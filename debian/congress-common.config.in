@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -e
+
+. /usr/share/debconf/confmodule
+CONF=/etc/congress/congress.conf
+
+#PKGOS-INCLUDE#
+
+pkgos_var_user_group congress
+pkgos_dbc_read_conf -pkg congress-common ${CONF} database connection congress $@
+pkgos_read_admin_creds ${CONF} keystone_authtoken congress
+
+exit 0

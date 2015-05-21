@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -e
+
+#PKGOS-INCLUDE#
+
+if [ "$1" = "configure" ] ; then
+	. /usr/share/debconf/confmodule
+	pkgos_register_endpoint_postinst congress congress volume "Congress Policy Service" 8776 /v1/'%(tenant_id)s'
+	db_stop
+fi
+
+#DEBHELPER#
+
+exit 0

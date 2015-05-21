@@ -1,0 +1,125 @@
+Source: congress
+Section: net
+Priority: extra
+Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
+Uploaders: Thomas Goirand <zigo@debian.org>
+Build-Depends: debhelper (>= 9),
+               dh-python,
+               dh-systemd,
+               openstack-pkg-tools (>= 23~),
+               po-debconf,
+               python-all,
+               python-pbr,
+               python-setuptools,
+               python-sphinx,
+Build-Depends-Indep: alembic (>= 0.7.2),
+                     python-babel,
+                     python-ceilometerclient (>= 1.0.13),
+                     python-cinderclient (>= 1:1.1.0),
+                     python-coverage,
+                     python-eventlet (>= 0.16.1),
+                     python-fixtures,
+                     python-glanceclient (>= 1:0.15.0),
+                     python-hacking,
+                     python-httpretty (>= 0.8.4),
+                     python-ironicclient (>= 0.2.1),
+                     python-keystoneclient (>= 1:1.1.0),
+                     python-keystonemiddleware (>= 1.5.0),
+                     python-mock,
+                     python-mox,
+                     python-neutronclient (>= 2.3.11),
+                     python-novaclient (>= 2:2.22.0),
+                     python-oslo.config (>= 1:1.9.3),
+                     python-oslo.db (>= 1.7.0),
+                     python-oslo.middleware (>= 1.0.0),
+                     python-oslo.serialization (>= 1.4.0),
+                     python-oslo.utils (>= 1.4.0),
+                     python-oslo.vmware (>= 0.11.1),
+                     python-paste,
+                     python-pastedeploy,
+                     python-posix-ipc,
+                     python-requests-mock (>= 0.6.0),
+                     python-retrying,
+                     python-routes,
+                     python-six (>= 1.9.0),
+                     python-swiftclient,
+                     python-testscenarios,
+                     python-testtools,
+                     python-webob,
+                     subunit,
+                     testrepository,
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/congress.git;a=summary
+Vcs-Git: git://anonscm.debian.org/openstack/congress.git
+Homepage: http://congress.openstack.org/
+
+Package: python-congress
+Section: python
+Architecture: all
+Depends: alembic (>= 0.7.2),
+         python-babel,
+         python-ceilometerclient (>= 1.0.13),
+         python-cinderclient (>= 1:1.1.0),
+         python-eventlet (>= 0.16.1),
+         python-glanceclient (>= 1:0.15.0),
+         python-ironicclient (>= 0.2.1),
+         python-keystoneclient (>= 1:1.1.0),
+         python-keystonemiddleware (>= 1.5.0),
+         python-mox,
+         python-neutronclient (>= 2.3.11),
+         python-novaclient (>= 2:2.22.0),
+         python-oslo.config (>= 1:1.9.3),
+         python-oslo.db (>= 1.7.0),
+         python-oslo.middleware (>= 1.0.0),
+         python-oslo.serialization (>= 1.4.0),
+         python-oslo.utils (>= 1.4.0),
+         python-oslo.vmware (>= 0.11.1),
+         python-paste,
+         python-pastedeploy,
+         python-posix-ipc,
+         python-routes,
+         python-six (>= 1.9.0),
+         python-swiftclient,
+         python-webob,
+         ${misc:Depends},
+         ${python:Depends},
+Description: OpenStack Policy as a Service - Python libraries
+ Congress is an OpenStack project to provide policy as a service across any
+ collection of cloud services in order to offer governance and compliance for
+ dynamic infrastructures.
+ .
+ This package contains the Python libraries that are part of Cinder.
+
+Package: congress-common
+Architecture: all
+Pre-Depends: dpkg (>= 1.15.6~)
+Depends: adduser,
+         dbconfig-common,
+         debconf,
+         python-congress (= ${binary:Version}),
+         sqlite3,
+         ${misc:Depends},
+         ${python:Depends}
+Provides: ${python:Provides}
+Description: OpenStack Policy as a Service - common files
+ Congress is an OpenStack project to provide policy as a service across any
+ collection of cloud services in order to offer governance and compliance for
+ dynamic infrastructures.
+ .
+ This package contains common files and configuration that are
+ needed by all the daemon packages of Cinder.
+
+Package: congress-server
+Architecture: all
+Pre-Depends: dpkg (>= 1.15.6~)
+Depends: adduser,
+         congress-common (= ${binary:Version}),
+         debconf,
+         ${misc:Depends},
+         ${ostack-lsb-base},
+         ${python:Depends}
+Description: OpenStack Policy as a Service - API server
+ Congress is an OpenStack project to provide policy as a service across any
+ collection of cloud services in order to offer governance and compliance for
+ dynamic infrastructures.
+ .
+ This package contains the API server on which clients will connect.
