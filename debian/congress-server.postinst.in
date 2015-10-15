@@ -6,7 +6,7 @@ set -e
 
 if [ "$1" = "configure" ] ; then
 	. /usr/share/debconf/confmodule
-	pkgos_register_endpoint_postinst congress congress volume "Congress Policy Service" 8776 /v1/'%(tenant_id)s'
+	pkgos_register_endpoint_postinst congress congress policy "Congress Policy Service" 1789 ""
 	db_stop
 fi
 
