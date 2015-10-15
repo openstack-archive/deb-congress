@@ -12,11 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import DATABASE_POLICY_TYPE
-from congress.datalog.base import NONRECURSIVE_POLICY_TYPE
+from oslo_log import log as logging
+
+from congress.datalog import base as datalog_base
 from congress.datalog import compile
-from congress.datalog.nonrecursive import NonrecursiveRuleTheory
-from congress.openstack.common import log as logging
+from congress.datalog import nonrecursive
 from congress.policy_engines import agnostic
 from congress.tests import base
 from congress.tests import helper
@@ -37,8 +37,10 @@ class TestRuntime(base.TestCase):
         if target is None:
             target = NREC_THEORY
         run = agnostic.Runtime()
-        run.create_policy(NREC_THEORY, kind=NONRECURSIVE_POLICY_TYPE)
-        run.create_policy(DB_THEORY, kind=DATABASE_POLICY_TYPE)
+        run.create_policy(NREC_THEORY,
+                          kind=datalog_base.NONRECURSIVE_POLICY_TYPE)
+        run.create_policy(DB_THEORY,
+                          kind=datalog_base.DATABASE_POLICY_TYPE)
         run.debug_mode()
         run.insert(code, target=target)
         return run
@@ -161,6 +163,7 @@ class TestRuntime(base.TestCase):
         run.insert('s(x,y) :- t(x,v), m(v,y)', th)
         run.delete('r(1)', th)
         run.delete('p(x) :- r(x), s(x,y)', th)
+
         ans = ('r(2) m(2,3) '
                'p(x) :- q(x), r(x) '
                's(x,y) :- t(x,v), m(v,y)')
@@ -308,56 +311,6 @@ class TestRuntime(base.TestCase):
         self.check_equal(run.select('p(x)', target=th), 'p(1)',
                          "Two layers of existential variables")
 
-        # Negation
-        run = self.prep_runtime('p(x) :- q(x), not r(x)'
-                                'q(1)'
-                                'q(2)'
-                                'r(2)', target=th)
-        self.check_equal(
-            run.select('p(1)', target=th), "p(1)", "Monadic negation")
-        self.check_equal(
-            run.select('p(2)', target=th), "", "False monadic negation")
-        self.check_equal(
-            run.select('p(x)', target=th), "p(1)",
-            "Variablized monadic negation")
-
-        run = self.prep_runtime('p(x) :- q(x,y), r(z), not s(y,z)'
-                                'q(1,1)'
-                                'q(2,2)'
-                                'r(4)'
-                                'r(5)'
-                                's(1,4)'
-                                's(1,5)'
-                                's(2,5)', target=th)
-        self.check_equal(
-            run.select('p(2)', target=th), "p(2)",
-            "Binary negation with existentials")
-        self.check_equal(
-            run.select('p(1)', target=th), "",
-            "False Binary negation with existentials")
-        self.check_equal(
-            run.select('p(x)', target=th), "p(2)",
-            "False Binary negation with existentials")
-
-        run = self.prep_runtime('p(x) :- q(x,y), s(y,z)'
-                                's(y,z) :- r(y,w), t(z), not u(w,z)'
-                                'q(1,1)'
-                                'q(2,2)'
-                                'r(1,4)'
-                                't(7)'
-                                'r(1,5)'
-                                't(8)'
-                                'u(5,8)', target=th)
-        self.check_equal(
-            run.select('p(1)', target=th), "p(1)",
-            "Embedded negation with existentials")
-        self.check_equal(
-            run.select('p(2)', target=th), "",
-            "False embedded negation with existentials")
-        self.check_equal(
-            run.select('p(x)', target=th), "p(1)",
-            "False embedded negation with existentials")
-
         # variables
         run = self.prep_runtime('p(x) :- q(x0,x)'
                                 'q(1,2)')
@@ -366,7 +319,7 @@ class TestRuntime(base.TestCase):
 
     def test_empty(self):
         # full empty
-        th = NonrecursiveRuleTheory()
+        th = nonrecursive.NonrecursiveRuleTheory()
         th.insert(compile.parse1('p(x) :- q(x)'))
         th.insert(compile.parse1('p(1)'))
         th.insert(compile.parse1('q(2)'))
@@ -374,7 +327,7 @@ class TestRuntime(base.TestCase):
         self.assertEqual(len(th.content()), 0)
 
         # empty with tablenames
-        th = NonrecursiveRuleTheory()
+        th = nonrecursive.NonrecursiveRuleTheory()
         th.insert(compile.parse1('p(x) :- q(x)'))
         th.insert(compile.parse1('p(1)'))
         th.insert(compile.parse1('q(2)'))
@@ -383,7 +336,7 @@ class TestRuntime(base.TestCase):
         self.assertTrue(e)
 
         # empty with invert
-        th = NonrecursiveRuleTheory()
+        th = nonrecursive.NonrecursiveRuleTheory()
         th.insert(compile.parse1('p(x) :- q(x)'))
         th.insert(compile.parse1('p(1)'))
         th.insert(compile.parse1('q(2)'))
@@ -411,7 +364,7 @@ class TestRuntime(base.TestCase):
         run.insert('p(x) :- q(x)', target=NREC_THEORY)
         run.insert('q(1)', target=DB_THEORY)
         (ans, trace) = run.select('p(x)', target=NREC_THEORY, trace=True)
-        self.check_equal(ans, 'p(1) ', "Multiple theory lookup")
+        self.check_equal(ans, 'p(1) ', "Tracing check")
         LOG.debug(trace)
         lines = trace.split('\n')
         self.assertEqual(len(lines), 16)
@@ -550,9 +503,77 @@ class TestRuntime(base.TestCase):
         check(code, 'p1(1) p1(2) q(1) q(2)', 'Monadic with empty tables')
 
 
+class TestSelectNegation(base.TestCase):
+    """Tests for negation within a select() routine."""
+    def check(self, run, query_string, correct_string, msg):
+        actual_string = run.select(query_string)
+        self.assertTrue(helper.datalog_equal(
+            actual_string, correct_string, msg))
+
+    def test_monadic(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.insert('p(x) :- q(x), not r(x)'
+                   'q(1)'
+                   'q(2)'
+                   'r(2)')
+
+        self.check(run, 'p(1)', 'p(1)', "Monadic negation")
+        self.check(run, 'p(2)', '', "False monadic negation")
+        self.check(run, 'p(x)', 'p(1)',
+                   "Variablized monadic negation")
+
+    def test_binary(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.insert('p(x) :- q(x,y), r(z), not s(y,z)'
+                   'q(1,1)'
+                   'q(2,2)'
+                   'r(4)'
+                   'r(5)'
+                   's(1,4)'
+                   's(1,5)'
+                   's(2,5)')
+        self.check(run, 'p(2)', 'p(2)',
+                   "Binary negation with existentials")
+        self.check(run, 'p(1)', '',
+                   "False Binary negation with existentials")
+        self.check(run, 'p(x)', 'p(2)',
+                   "False Binary negation with existentials")
+
+    def test_depth(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.insert('p(x) :- q(x,y), s(y,z)'
+                   's(y,z) :- r(y,w), t(z), not u(w,z)'
+                   'q(1,1)'
+                   'q(2,2)'
+                   'r(1,4)'
+                   't(7)'
+                   'r(1,5)'
+                   't(8)'
+                   'u(5,8)')
+        self.check(run, 'p(1)', 'p(1)',
+                   "Embedded negation with existentials")
+        self.check(run, 'p(2)', '',
+                   "False embedded negation with existentials")
+        self.check(run, 'p(x)', 'p(1)',
+                   "False embedded negation with existentials")
+
+    def test_mid_rule(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.insert('p(x) :- q(x), not s(x), r(x)'
+                   'q(1) q(2) q(3) q(4) q(5) q(6)'
+                   's(1) s(3) s(5)'
+                   'r(2) r(6)')
+        self.check(run, 'p(x)', 'p(2) p(6)',
+                   "Multiple answers with monadic negation in middle of rule")
+
+
 class TestArity(base.TestCase):
     def test_regular_parsing(self):
-        th = NonrecursiveRuleTheory()
+        th = nonrecursive.NonrecursiveRuleTheory()
         th.insert(compile.parse1('p(x) :- q(x, y)'))
         th.insert(compile.parse1('execute[r(x)] :- t(x, y)'))
         th.insert(compile.parse1('execute[nova:s(x, y)] :- u(x, y)'))
@@ -566,9 +587,10 @@ class TestArity(base.TestCase):
         self.assertEqual(th.arity('nova:noargs', modal='execute'), 0)
 
     def test_no_split_parsing(self):
-        th = NonrecursiveRuleTheory()
+        th = nonrecursive.NonrecursiveRuleTheory()
         th.insert(compile.parse1('nova:v(x, y) :- u(x, y)',
                                  use_modules=False))
+
         self.assertEqual(th.arity('nova:v'), 2)
         self.assertIsNone(th.arity('nova:v', modal='insert'))
         th.insert(compile.parse1('insert[neutron:v(x, y, z)] :- u(x, y)',
@@ -577,7 +599,85 @@ class TestArity(base.TestCase):
         self.assertEqual(th.arity('neutron:v', modal='insert'), 3)
 
     def test_schema(self):
-        th = NonrecursiveRuleTheory(name='alice')
+        th = nonrecursive.NonrecursiveRuleTheory(name='alice')
         th.schema = compile.Schema({'p': ('id', 'status', 'name')})
         self.assertEqual(th.arity('p'), 3)
         self.assertEqual(th.arity('alice:p'), 3)
+
+
+class TestInstances(base.TestCase):
+    """Tests for Runtime's delegation functionality."""
+    def check(self, rule, data, correct, possibilities=None):
+        rule = compile.parse1(rule, use_modules=False)
+        data = compile.parse(data, use_modules=False)
+        possibilities = possibilities or ''
+        possibilities = compile.parse(possibilities, use_modules=False)
+        possibilities = [compile.Rule(x, []) for x in possibilities]
+        poss = {}
+        for rule_lit in possibilities:
+            if rule_lit.head.tablename() not in poss:
+                poss[rule_lit.head.tablename()] = set([rule_lit])
+            else:
+                poss[rule_lit.head.tablename()].add(rule_lit)
+
+        th = nonrecursive.MultiModuleNonrecursiveRuleTheory()
+        th.debug_mode()
+        for lit in data:
+            th.insert(lit)
+        result = th.instances(rule, poss)
+        actual = " ".join(str(x) for x in result)
+        e = helper.datalog_equal(actual, correct)
+        self.assertTrue(e)
+
+    def test_basic(self):
+        rule = 'p(x) :- r(x)'
+        data = 'r(1) r(2)'
+        correct = ('p(1) :- r(1) '
+                   'p(2) :- r(2)')
+        self.check(rule, data, correct)
+
+    def test_multiple_literals(self):
+        rule = 'p(x) :- r(x), s(x)'
+        data = 'r(1) r(2) r(3) s(2) s(3)'
+        correct = ('p(2) :- r(2), s(2) '
+                   'p(3) :- r(3), s(3)')
+        self.check(rule, data, correct)
+
+    def test_grounded(self):
+        rule = 'p(x) :- t(5), r(x), s(x)'
+        data = 'r(1) r(2) r(3) s(2) s(3)'
+        correct = ('p(2) :- t(5), r(2), s(2) '
+                   'p(3) :- t(5), r(3), s(3)')
+        self.check(rule, data, correct)
+
+    def test_builtins(self):
+        rule = 'p(x, z) :- r(x), s(y), plus(x, y, z)'
+        data = 'r(1) s(2) s(3)'
+        correct = ('p(1, z) :- r(1), s(2), plus(1, 2, z) '
+                   'p(1, z) :- r(1), s(3), plus(1, 3, z)')
+        self.check(rule, data, correct)
+
+    def test_builtins_reordered(self):
+        rule = 'p(x, z) :- r(x), plus(x, y, z), s(y)'
+        data = 'r(1) s(2) s(3)'
+        correct = ('p(1, z) :- r(1), plus(1, 2, z), s(2) '
+                   'p(1, z) :- r(1), plus(1, 3, z), s(3)')
+        self.check(rule, data, correct)
+
+    def test_modules(self):
+        # Nonstandard here in that for instances, we are assuming all the
+        #   data that we need is in the current policy, even if it references
+        #   a different policy explicitly.
+        rule = 'p(x) :- nova:r(x)'
+        data = 'nova:r(1) nova:r(2)'
+        correct = ('p(1) :- nova:r(1) '
+                   'p(2) :- nova:r(2)')
+        self.check(rule, data, correct)
+
+    def test_possibilities(self):
+        rule = 'p(x) :- q(x)'
+        data = 'q(1) q(5)'
+        poss = 'q(2) q(3)'
+        correct = ('p(2) :- q(2) '
+                   'p(3) :- q(3) ')
+        self.check(rule, data, correct, poss)

@@ -12,20 +12,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import ACTION_POLICY_TYPE
-from congress.datalog.base import NONRECURSIVE_POLICY_TYPE
+
+from oslo_log import log as logging
+
+from congress.datalog import base
 from congress.datalog import compile
-from congress.datalog.compile import Event
-from congress.datalog.ruleset import RuleSet
-from congress.datalog.topdown import TopDownTheory
-from congress.datalog.utility import iterstr
-from congress.exception import PolicyException
-from congress.openstack.common import log as logging
+from congress.datalog import ruleset
+from congress.datalog import topdown
+from congress.datalog import utility
+from congress import exception
+
 
 LOG = logging.getLogger(__name__)
 
 
-class NonrecursiveRuleTheory(TopDownTheory):
+class NonrecursiveRuleTheory(topdown.TopDownTheory):
     """A non-recursive collection of Rules."""
 
     def __init__(self, name=None, abbr=None,
@@ -33,8 +34,8 @@ class NonrecursiveRuleTheory(TopDownTheory):
         super(NonrecursiveRuleTheory, self).__init__(
             name=name, abbr=abbr, theories=theories, schema=schema)
         # dictionary from table name to list of rules with that table in head
-        self.rules = RuleSet()
-        self.kind = NONRECURSIVE_POLICY_TYPE
+        self.rules = ruleset.RuleSet()
+        self.kind = base.NONRECURSIVE_POLICY_TYPE
 
     # External Interface
 
@@ -67,11 +68,11 @@ class NonrecursiveRuleTheory(TopDownTheory):
                  len(cleared_tables), count)
 
     def insert(self, rule):
-        changes = self.update([Event(formula=rule, insert=True)])
+        changes = self.update([compile.Event(formula=rule, insert=True)])
         return [event.formula for event in changes]
 
     def delete(self, rule):
-        changes = self.update([Event(formula=rule, insert=False)])
+        changes = self.update([compile.Event(formula=rule, insert=False)])
         return [event.formula for event in changes]
 
     def update(self, events):
@@ -82,7 +83,7 @@ class NonrecursiveRuleTheory(TopDownTheory):
            a policy statement.
            """
         changes = []
-        self.log(None, "Update %s", iterstr(events))
+        self.log(None, "Update %s", utility.iterstr(events))
         try:
             for event in events:
                 formula = compile.reorder_for_safety(event.formula)
@@ -105,11 +106,11 @@ class NonrecursiveRuleTheory(TopDownTheory):
         to apply the insert/deletes of policy statements dictated by
         EVENTS to the current policy.
         """
-        self.log(None, "update_would_cause_errors %s", iterstr(events))
+        self.log(None, "update_would_cause_errors %s", utility.iterstr(events))
         errors = []
         for event in events:
             if not compile.is_datalog(event.formula):
-                errors.append(PolicyException(
+                errors.append(exception.PolicyException(
                     "Non-formula found: {}".format(
                         str(event.formula))))
             else:
@@ -127,7 +128,7 @@ class NonrecursiveRuleTheory(TopDownTheory):
     def define(self, rules):
         """Empties and then inserts RULES."""
         self.empty()
-        return self.update([Event(formula=rule, insert=True)
+        return self.update([compile.Event(formula=rule, insert=True)
                             for rule in rules])
 
     def empty(self, tablenames=None, invert=False):
@@ -154,9 +155,9 @@ class NonrecursiveRuleTheory(TopDownTheory):
 
     def __contains__(self, formula):
         if compile.is_atom(formula):
-            return self.rules.contains(formula.table, formula)
+            return self.rules.contains(formula.table.table, formula)
         else:
-            return self.rules.contains(formula.head.table, formula)
+            return self.rules.contains(formula.head.table.table, formula)
 
     # Internal Interface
 
@@ -164,15 +165,15 @@ class NonrecursiveRuleTheory(TopDownTheory):
         """Insert RULE and return True if there was a change."""
         if compile.is_atom(rule):
             rule = compile.Rule(rule, [], rule.location)
-        self.log(rule.head.table, "Insert: %s", repr(rule))
-        return self.rules.add_rule(rule.head.table, rule)
+        self.log(rule.head.table.table, "Insert: %s", repr(rule))
+        return self.rules.add_rule(rule.head.table.table, rule)
 
     def _delete_actual(self, rule):
         """Delete RULE and return True if there was a change."""
         if compile.is_atom(rule):
             rule = compile.Rule(rule, [], rule.location)
-        self.log(rule.head.table, "Delete: %s", rule)
-        return self.rules.discard_rule(rule.head.table, rule)
+        self.log(rule.head.table.table, "Delete: %s", rule)
+        return self.rules.discard_rule(rule.head.table.table, rule)
 
     def content(self, tablenames=None):
         if tablenames is None:
@@ -194,27 +195,33 @@ class NonrecursiveRuleTheory(TopDownTheory):
             return self.rules.get_rules(table, match_literal)
         return []
 
-    def arity(self, tablename, modal=None):
+    def arity(self, table, modal=None):
         """Return the number of arguments TABLENAME takes.
 
-        Returns None if tablename is not defined (if it does not occur in
+        :param table can be either a string or a Tablename
+        Returns None if arity is unknown (if it does not occur in
             the head of a rule).
         """
-        policy, table = compile.parse_tablename(tablename)
+        if isinstance(table, compile.Tablename):
+            service = table.service
+            name = table.table
+            fullname = table.name()
+        else:
+            fullname = table
+            service, name = compile.Tablename.parse_service_table(table)
         # check if schema knows the answer
         if self.schema:
-            if policy is None or policy == self.name:
-                arity = self.schema.arity(table)
+            if service is None or service == self.name:
+                arity = self.schema.arity(name)
             else:
-                arity = self.schema.arity(tablename)
+                arity = self.schema.arity(fullname)
             if arity is not None:
                 return arity
         # assuming a single arity for all tables
-        formulas = self.head_index(tablename) or self.head_index(table)
+        formulas = self.head_index(fullname) or self.head_index(name)
         try:
             first = next(f for f in formulas
-                         if compile.literal_table_matches(
-                             f.head, policy, table, modal))
+                         if f.head.table.matches(service, name, modal))
         except StopIteration:
             return None
         # should probably have an overridable function for computing
@@ -253,7 +260,7 @@ class ActionTheory(NonrecursiveRuleTheory):
                  schema=None, theories=None):
         super(ActionTheory, self).__init__(name=name, abbr=abbr,
                                            schema=schema, theories=theories)
-        self.kind = ACTION_POLICY_TYPE
+        self.kind = base.ACTION_POLICY_TYPE
 
     def update_would_cause_errors(self, events):
         """Return a list of PolicyException.
@@ -261,11 +268,11 @@ class ActionTheory(NonrecursiveRuleTheory):
         Return a list of PolicyException if we were
         to apply the events EVENTS to the current policy.
         """
-        self.log(None, "update_would_cause_errors %s", iterstr(events))
+        self.log(None, "update_would_cause_errors %s", utility.iterstr(events))
         errors = []
         for event in events:
             if not compile.is_datalog(event.formula):
-                errors.append(PolicyException(
+                errors.append(exception.PolicyException(
                     "Non-formula found: {}".format(
                         str(event.formula))))
             else:
@@ -285,7 +292,25 @@ class ActionTheory(NonrecursiveRuleTheory):
         return errors
 
 
-class UnsafeNonrecursiveRuleTheory(NonrecursiveRuleTheory):
-    """Nonrecursive rule theory without any safety checks."""
-    def update_would_cause_errors(self, events):
-        return []
+class MultiModuleNonrecursiveRuleTheory(NonrecursiveRuleTheory):
+    """MultiModuleNonrecursiveRuleTheory object.
+
+    Same as NonrecursiveRuleTheory, except we allow rules with theories
+    in the head.  Intended for use with TopDownTheory's INSTANCES method.
+    """
+    def _insert_actual(self, rule):
+        """Insert RULE and return True if there was a change."""
+        if compile.is_atom(rule):
+            rule = compile.Rule(rule, [], rule.location)
+        self.log(rule.head.table.table, "Insert: %s", rule)
+        return self.rules.add_rule(rule.head.table.table, rule)
+
+    def _delete_actual(self, rule):
+        """Delete RULE and return True if there was a change."""
+        if compile.is_atom(rule):
+            rule = compile.Rule(rule, [], rule.location)
+        self.log(rule.head.table.table, "Delete: %s", rule)
+        return self.rules.discard_rule(rule.head.table.table, rule)
+
+    # def update_would_cause_errors(self, events):
+    #     return []

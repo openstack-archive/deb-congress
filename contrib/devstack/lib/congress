@@ -87,7 +87,8 @@ function configure_congress {
     fi
     sudo chown $STACK_USER $CONGRESS_CONF_DIR
 
-    cp $CONGRESS_DIR/etc/congress.conf.sample $CONGRESS_CONF
+    touch $CONGRESS_CONF
+    sudo chown $STACK_USER $CONGRESS_CONF
 
     # Format logging
     if [ "$LOG_COLOR" == "True" ] && [ "$SYSLOG" == "False" ]; then
@@ -95,21 +96,14 @@ function configure_congress {
     fi
     CONGRESS_API_PASTE_FILE=$CONGRESS_CONF_DIR/api-paste.ini
     CONGRESS_POLICY_FILE=$CONGRESS_CONF_DIR/policy.json
-    CONGRESS_POLICY_PATH=$CONGRESS_CONF_DIR/snapshot
 
     cp $CONGRESS_DIR/etc/api-paste.ini $CONGRESS_API_PASTE_FILE
     cp $CONGRESS_DIR/etc/policy.json $CONGRESS_POLICY_FILE
-    if [[ -d $CONGRESS_DIR/etc/snapshot ]]; then
-        cp -r $CONGRESS_DIR/etc/snapshot $CONGRESS_CONF_DIR
-    else
-        sudo mkdir -p $CONGRESS_CONF_DIR/snapshot
-    fi
 
     # Update either configuration file
     iniset $CONGRESS_CONF DEFAULT verbose True
     iniset $CONGRESS_CONF DEFAULT debug $ENABLE_DEBUG_LOG_LEVEL
-    iniset $CONGRESS_CONF DEFAULT policy_file $CONGRESS_POLICY_FILE
-    iniset $CONGRESS_CONF DEFAULT policy_path $CONGRESS_POLICY_PATH
+    iniset $CONGRESS_CONF oslo_policy policy_file $CONGRESS_POLICY_FILE
     iniset $CONGRESS_CONF DEFAULT auth_strategy $CONGRESS_AUTH_STRATEGY
 
 
@@ -140,7 +134,7 @@ function configure_congress {
 }
 
 function _congress_setup_third_party_requirements {
-    sudo pip install -r $CONGRESS_DIR/thirdparty-requirements.txt
+    pip_install -r $CONGRESS_DIR/thirdparty-requirements.txt
 }
 
 function configure_congress_datasources {

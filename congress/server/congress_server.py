@@ -20,15 +20,13 @@ import sys
 
 import eventlet
 eventlet.monkey_patch()
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_service import service
 from paste import deploy
 
 from congress.common import config
 from congress.common import eventlet_server
-from congress.openstack.common import log as logging
-from congress.openstack.common import service
-from congress.openstack.common import systemd
-
 
 LOG = logging.getLogger(__name__)
 
@@ -63,9 +61,9 @@ def create_api_server(conf, name, host, port, workers):
 def serve(*servers):
     if max([server[1].workers for server in servers]) > 1:
         # TODO(arosen) - need to provide way to communicate with DSE services
-        launcher = service.ProcessLauncher()
+        launcher = service.ProcessLauncher(cfg.CONF)
     else:
-        launcher = service.ServiceLauncher()
+        launcher = service.ServiceLauncher(cfg.CONF)
 
     for name, server in servers:
         try:
@@ -74,11 +72,10 @@ def serve(*servers):
             LOG.exception(_('Failed to start the %s server'), name)
             raise
 
-    # notify calling process we are ready to serve
-    systemd.notify_once()
-
-    for name, server in servers:
+    try:
         launcher.wait()
+    except KeyboardInterrupt:
+        LOG.info("Congress server stopped by interrupt.")
 
 
 def main():

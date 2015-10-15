@@ -18,10 +18,11 @@ try:
 except ImportError:
     import httplib
 
+from oslo_log import log as logging
+
 from congress.api import webservice
 from congress.dse import deepsix
 from congress.managers import datasource as datasource_manager
-from congress.openstack.common import log as logging
 
 
 def d6service(name, keys, inbox, datapath, args):
@@ -109,7 +110,8 @@ class RowModel(deepsix.deepSix):
                 raise webservice.DataModelException(404, m, httplib.NOT_FOUND)
             tablename = context['table_id']
             if tablename not in self.engine.theory[policy_name].tablenames():
-                m = "Unknown tablename '%s' for policy '%s'" % tablename
+                m = "Unknown tablename '%s' for policy '%s'" % (
+                    tablename, policy_name)
                 LOG.info(m)
                 raise webservice.DataModelException(404, m, httplib.NOT_FOUND)
             arity = self.engine.arity(tablename, policy_name)

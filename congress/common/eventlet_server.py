@@ -25,35 +25,37 @@ import sys
 import eventlet
 import eventlet.wsgi
 import greenlet
-
-from congress.openstack.common import log
-
-
-LOG = log.getLogger(__name__)
+from oslo_log import log as logging
+from oslo_service import service
 
 
-class EventletFilteringLogger(log.WritableLogger):
+LOG = logging.getLogger(__name__)
+
+
+class EventletFilteringLogger(object):
     # NOTE(morganfainberg): This logger is designed to filter out specific
     # Tracebacks to limit the amount of data that eventlet can log. In the
     # case of broken sockets (EPIPE and ECONNRESET), we are seeing a huge
     # volume of data being written to the logs due to ~14 lines+ per traceback.
     # The traceback in these cases are, at best, useful for limited debugging
     # cases.
-    def __init__(self, *args, **kwargs):
-        super(EventletFilteringLogger, self).__init__(*args, **kwargs)
+    def __init__(self, logger):
+        self.logger = logger
+        self.level = logger.logger.level
         self.regex = re.compile(r'errno (%d|%d)' %
                                 (errno.EPIPE, errno.ECONNRESET), re.IGNORECASE)
 
     def write(self, msg):
         m = self.regex.search(msg)
         if m:
-            self.logger.log(log.logging.DEBUG, 'Error(%s) writing to socket.',
+            self.logger.log(logging.logging.DEBUG,
+                            'Error(%s) writing to socket.',
                             m.group(1))
         else:
             self.logger.log(self.level, msg.rstrip())
 
 
-class Server(object):
+class Server(service.ServiceBase):
     """Server class to manage multiple WSGI sockets and applications."""
 
     def __init__(self, application, host=None, port=None, threads=1000,
@@ -147,6 +149,9 @@ class Server(object):
     def stop(self):
         self.kill()
 
+    def reset(self):
+        LOG.info("reset() not implemented yet")
+
     def wait(self):
         """Wait until all servers have completed running."""
         try:
@@ -158,9 +163,9 @@ class Server(object):
 
     def _run(self, application, socket):
         """Start a WSGI server in a new green thread."""
-        logger = log.getLogger('eventlet.wsgi.server')
+        logger = logging.getLogger('eventlet.wsgi.server')
         try:
-            eventlet.wsgi.server(socket, application, custom_pool=self.pool,
+            eventlet.wsgi.server(socket, application, max_size=1000,
                                  log=EventletFilteringLogger(logger),
                                  debug=False)
         except greenlet.GreenletExit:

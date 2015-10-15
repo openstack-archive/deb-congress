@@ -13,8 +13,9 @@
 #    under the License.
 #
 
+from oslo_log import log as logging
+
 from congress.datasources import datasource_driver
-from congress.openstack.common import log as logging
 
 
 LOG = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ class TestDriver(datasource_driver.DataSourceDriver):
         super(TestDriver, self).__init__(name, keys, inbox, datapath, args)
         self.msg = None
         self.state = {}
-        self.initialized = True
+        self._init_end_start_poll()
 
     def receive_msg(self, msg):
         LOG.info("TestDriver: received msg %s", msg)

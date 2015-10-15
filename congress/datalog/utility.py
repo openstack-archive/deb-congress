@@ -27,6 +27,9 @@ class Graph(object):
             self.begin = begin
             self.end = end
 
+        def __str__(self):
+            return "<begin: %s, end: %s>" % (self.begin, self.end)
+
     class edge_data(object):
         """Data for each edge in graph."""
         def __init__(self, node=None, label=None):
@@ -130,27 +133,25 @@ class Graph(object):
         return (val1 in self.edges and
                 self.edge_data(val2, label) in self.edges[val1])
 
-    def depth_first_search(self):
+    def reset_nodes(self):
+        for node in self.nodes:
+            self.nodes[node] = None
+
+    def depth_first_search(self, roots=None):
         """Run depth first search on the graph.
 
         Also modify self.nodes, self.counter, and self.cycle.
         """
         self.reset()
-        for node in self.nodes:
-            if self.nodes[node].begin is None:
+        roots = roots or self.nodes
+        for node in roots:
+            if node in self.nodes and self.nodes[node].begin is None:
                 self.dfs(node)
 
-    def depth_first_search_node(self, node):
-        """Run depth-first search on the nodes reachable from NODE.
-
-        Modifies self.nodes, self.counter, and self.cycle.
-        """
-        self.reset()
-        self.dfs(node)
-
-    def reset(self):
+    def reset(self, roots=None):
         """Return nodes to pristine state."""
-        for node in self.nodes:
+        roots = roots or self.nodes
+        for node in roots:
             self.nodes[node] = self.dfs_data()
         self.counter = 0
         self.cycles = []
@@ -244,11 +245,11 @@ class Graph(object):
         node_obj = self.nodes[node]
 
         if node_obj is None or node_obj.begin is None or node_obj.end is None:
-            self.depth_first_search_node(node)
+            self.depth_first_search([node])
             node_obj = self.nodes[node]
         begin = node_obj.begin
         end = node_obj.end
-        return set([n for n, dfs_obj in self.nodes.iteritems()
+        return set([n for n, dfs_obj in self.nodes.items()
                     if begin <= dfs_obj.begin and dfs_obj.end <= end])
 
     def next_counter(self):
@@ -265,6 +266,34 @@ class Graph(object):
             s += "],\n"
         s += "}"
         return s
+
+    def find_dependent_nodes(self, nodes):
+        """Return all nodes dependent on @nodes.
+
+        Node T is dependent on node T.
+        Node T is dependent on node R if there is an edge from node S to T,
+            and S is dependent on R.
+        """
+        # TODO(thinrichs): is it equivalent/better to invert all the edges
+        #   and run depth-first-search?
+        marked = set(nodes)  # copy so we can modify
+        changed = True
+        while changed:
+            changed = False
+            for node in self.edges:
+                hasmarked = any(x.node in marked for x in self.edges[node])
+                if hasmarked:
+                    if node not in marked:
+                        marked.add(node)
+                        changed = True
+        return marked
+
+    def find_reachable_nodes(self, roots):
+        """Return all nodes reachable from @roots."""
+        self.depth_first_search(roots)
+        result = [x for x in self.nodes if self.nodes[x].begin is not None]
+        self.reset_nodes()
+        return set(result)
 
 
 class BagGraph(Graph):
@@ -434,17 +463,25 @@ class OrderedSet(collections.MutableSet):
             return False
 
 
-# A silly trick to get around casting large iterables to strings unless
-# necessary. This ought to be eliminated when possible by paring down
-# what's logged.
 class iterstr(object):
-    def __init__(self, iterable):
-        self.__iterable = iterable
-        self.__interpolated = None
+    """Lazily provides informal string representation of iterables.
 
-    def __getattribute__(self, name):
-        if self.__interpolated is None:
-            self.__interpolated = ("[" +
-                                   ";".join([str(x) for x in self.__iterable])
-                                   + "]")
-        return getattr(self.__interpolated, name)
+    Calling __str__ directly on iterables returns a string containing the
+    formal representation of the elements. This class wraps the iterable and
+    instead returns the informal representation of the elements.
+    """
+
+    def __init__(self, iterable):
+        self.iterable = iterable
+        self._str_interp = None
+        self._repr_interp = None
+
+    def __str__(self):
+        if self._str_interp is None:
+            self._str_interp = "[" + ";".join(map(str, self.iterable)) + "]"
+        return self._str_interp
+
+    def __repr__(self):
+        if self._repr_interp is None:
+            self._repr_interp = "[" + ";".join(map(repr, self.iterable)) + "]"
+        return self._repr_interp

@@ -12,17 +12,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import Theory
-from congress.datalog.builtin.congressbuiltin import builtin_registry
+
+from oslo_log import log as logging
+import six
+
+from congress.datalog import base
+from congress.datalog.builtin import congressbuiltin
 from congress.datalog import compile
 from congress.datalog import unify
-from congress.datalog.utility import iterstr
-from congress.openstack.common import log as logging
+from congress.datalog import utility
 
 LOG = logging.getLogger(__name__)
 
 
-class TopDownTheory(Theory):
+class TopDownTheory(base.Theory):
     """Class that holds the Top-Down evaluation routines.
 
     Classes will inherit from this class if they want to import and specialize
@@ -55,7 +58,7 @@ class TopDownTheory(Theory):
 
         def __str__(self):
             return "TopDownResult(binding={}, support={})".format(
-                unify.binding_str(self.binding), iterstr(self.support))
+                unify.binding_str(self.binding), utility.iterstr(self.support))
 
     class TopDownCaller(object):
         """Struct for info about the original caller of top-down evaluation.
@@ -91,9 +94,9 @@ class TopDownTheory(Theory):
             return (
                 "TopDownCaller<variables={}, binding={}, find_all={}, "
                 "results={}, save={}, support={}>".format(
-                    iterstr(self.variables), str(self.binding),
-                    str(self.find_all), iterstr(self.results), repr(self.save),
-                    iterstr(self.support)))
+                    utility.iterstr(self.variables), str(self.binding),
+                    str(self.find_all), utility.iterstr(self.results),
+                    repr(self.save), utility.iterstr(self.support)))
 
     #########################################
     # External interface
@@ -155,7 +158,7 @@ class TopDownTheory(Theory):
         QUERY is unconditionally true, i.e. no literals are saved
         when proving a negative literal is true.
         """
-        assert compile.is_datalog(query), "Explain requires a formula"
+        assert compile.is_datalog(query), "abduce requires a formula"
         if compile.is_atom(query):
             literals = [query]
             output = query
@@ -166,7 +169,7 @@ class TopDownTheory(Theory):
         #   here is just the head of QUERY (or QUERY itself if it is an atom)
         abductions = self.top_down_abduction(
             output.variables(), literals, find_all=find_all,
-            save=lambda lit, binding: lit.table in tablenames)
+            save=lambda lit, binding: lit.tablename() in tablenames)
         results = [compile.Rule(output.plug(abd.binding), abd.support)
                    for abd in abductions]
         self.log(query.tablename(), "abduction result:")
@@ -179,7 +182,8 @@ class TopDownTheory(Theory):
         if table_theories is None:
             table_theories = set()
             for key in self.rules.keys():
-                table_theories |= set([(rule.head.table, rule.head.theory)
+                table_theories |= set([(rule.head.table.table,
+                                        rule.head.table.service)
                                        for rule in self.rules.get_rules(key)])
         results = set()
         # create queries: need table names and arities
@@ -187,7 +191,7 @@ class TopDownTheory(Theory):
         #   modals once we start using insert[p(x)] instead of p+(x)
         for (table, theory) in table_theories:
             if filter is None or filter(table):
-                tablename = compile.build_tablename(theory, table)
+                tablename = compile.Tablename(table, theory)
                 arity = self.arity(tablename)
                 vs = []
                 for i in xrange(0, arity):
@@ -296,9 +300,10 @@ class TopDownTheory(Theory):
             #    as we can.
             # Ensure save=None so that abduction does not save anything.
             #    Saving while performing NAF makes no sense.
-            if self._top_down_eval(new_context, new_caller):
+            self._top_down_eval(new_context, new_caller)
+            if len(new_caller.results) > 0:
                 self._print_fail(lit, context.binding, context.depth)
-                return False
+                return False   # not done searching, b/c we failed
             else:
                 # don't need bindings b/c LIT must be ground
                 return self._top_down_finish(context, caller, redo=False)
@@ -308,12 +313,12 @@ class TopDownTheory(Theory):
         elif lit.tablename() == 'false':
             self._print_fail(lit, context.binding, context.depth)
             return False
-        elif builtin_registry.is_builtin(lit.table, len(lit.arguments)):
+        elif lit.is_builtin():
             return self._top_down_builtin(context, caller)
         elif (self.theories is not None and
-              lit.theory is not None and
-              lit.modal is None and  # not a modal
-              lit.theory != self.name and
+              lit.table.service is not None and
+              lit.table.modal is None and  # not a modal
+              lit.table.service != self.name and
               not lit.is_update()):  # not a pseudo-modal
             return self._top_down_module(context, caller)
         else:
@@ -326,15 +331,27 @@ class TopDownTheory(Theory):
         """
         lit = context.literals[context.literal_index]
         self._print_call(lit, context.binding, context.depth)
-        builtin = builtin_registry.builtin(lit.table)
+        builtin = congressbuiltin.builtin_registry.builtin(lit.table)
         # copy arguments into variables
         # PLUGGED is an instance of compile.Literal
         plugged = lit.plug(context.binding)
-        # print "plugged: " + str(plugged)
         # PLUGGED.arguments is a list of compile.Term
         # create args for function
         args = []
         for i in xrange(0, builtin.num_inputs):
+            # save builtins with unbound vars during evaluation
+            if not plugged.arguments[i].is_object() and caller.save:
+                # save lit and binding--binding may not be fully flushed out
+                #   when we save (or ever for that matter)
+                caller.support.append((lit, context.binding))
+                self._print_save(lit, context.binding, context.depth)
+                success = self._top_down_finish(context, caller)
+                caller.support.pop()  # pop in either case
+                if success:
+                    return True
+                else:
+                    self._print_fail(lit, context.binding, context.depth)
+                    return False
             assert plugged.arguments[i].is_object(), (
                 ("Builtins must be evaluated only after their "
                  "inputs are ground: {} with num-inputs {}".format(
@@ -357,7 +374,8 @@ class TopDownTheory(Theory):
         if builtin.num_outputs > 0:
             # with return values, local success means we can bind
             #  the results to the return value arguments
-            if isinstance(result, (int, long, float, basestring)):
+            if (isinstance(result,
+                           (six.integer_types, float, six.string_types))):
                 result = [result]
             # Turn result into normal objects
             result = [compile.Term.create_from_python(x) for x in result]
@@ -367,14 +385,11 @@ class TopDownTheory(Theory):
                                         unifier,
                                         lit.arguments[builtin.num_inputs:],
                                         context.binding)
-            # print "unifier: " + str(undo)
             success = undo is not None
         else:
             # without return values, local success means
             #   result was True according to Python
             success = bool(result)
-
-        # print "success: " + str(success)
 
         if not success:
             self._print_fail(lit, context.binding, context.depth)
@@ -395,13 +410,13 @@ class TopDownTheory(Theory):
         """Move to another theory and continue evaluation."""
         # LOG.debug("%s._top_down_module(%s)", self.name, context)
         lit = context.literals[context.literal_index]
-        if lit.theory not in self.theories:
+        if lit.table.service not in self.theories:
             self._print_call(lit, context.binding, context.depth)
-            errmsg = "No such policy: %s" % lit.theory
+            errmsg = "No such policy: %s" % lit.table.service
             self._print_note(lit, context.binding, context.depth, errmsg)
             self._print_fail(lit, context.binding, context.depth)
             return False
-        return self.theories[lit.theory]._top_down_eval(context, caller)
+        return self.theories[lit.table.service]._top_down_eval(context, caller)
 
     def _top_down_truth(self, context, caller):
         """Top down evaluation.
@@ -428,9 +443,8 @@ class TopDownTheory(Theory):
         # LOG.debug("%s._top_down_th(%s)", self.name, context)
         lit = context.literals[context.literal_index]
         self._print_call(lit, context.binding, context.depth)
-
-        for rule in self.head_index(lit.table, lit.plug(context.binding)):
-            # LOG.debug("%s._top_down_th rule: %s", self.name, rule)
+        for rule in self.head_index(lit.table.table,
+                                    lit.plug(context.binding)):
             unifier = self.new_bi_unifier()
             self._print_note(lit, context.binding, context.depth,
                              "Trying %s" % rule)
@@ -500,28 +514,28 @@ class TopDownTheory(Theory):
 
     def _print_call(self, literal, binding, depth):
         msg = "{}Call: %s".format("| " * depth)
-        self.log(literal.table, msg, literal.plug(binding))
+        self.log(literal.tablename(), msg, literal.plug(binding))
 
     def _print_exit(self, literal, binding, depth):
         msg = "{}Exit: %s".format("| " * depth)
-        self.log(literal.table, msg, literal.plug(binding))
+        self.log(literal.tablename(), msg, literal.plug(binding))
 
     def _print_save(self, literal, binding, depth):
         msg = "{}Save: %s".format("| " * depth)
-        self.log(literal.table, msg, literal.plug(binding))
+        self.log(literal.tablename(), msg, literal.plug(binding))
 
     def _print_fail(self, literal, binding, depth):
         msg = "{}Fail: %s".format("| " * depth)
-        self.log(literal.table, msg, literal.plug(binding))
+        self.log(literal.tablename(), msg, literal.plug(binding))
         return False
 
     def _print_redo(self, literal, binding, depth):
         msg = "{}Redo: %s".format("| " * depth)
-        self.log(literal.table, msg, literal.plug(binding))
+        self.log(literal.tablename(), msg, literal.plug(binding))
         return False
 
     def _print_note(self, literal, binding, depth, msg):
-        self.log(literal.table, "{}Note: {}".format("| " * depth,
+        self.log(literal.tablename(), "{}Note: {}".format("| " * depth,
                  msg))
 
     #########################################
@@ -575,3 +589,44 @@ class TopDownTheory(Theory):
         """
         return unify.bi_unify_atoms(head, unifier1, body_element, unifier2,
                                     theoryname)
+
+    #########################################
+    # Routines for unknowns
+
+    def instances(self, rule, possibilities=None):
+        results = set([])
+        possibilities = possibilities or []
+        self._instances(rule, 0, self.new_bi_unifier(), results, possibilities)
+        return results
+
+    def _instances(self, rule, index, binding, results, possibilities):
+        """Return all instances of the given RULE without evaluating builtins.
+
+        Assumes self.head_index returns rules with empty bodies.
+        """
+        if index >= len(rule.body):
+            results.add(rule.plug(binding))
+            return
+        lit = rule.body[index]
+        self._print_call(lit, binding, 0)
+        # if already ground or a builtin, go to the next literal
+        if (lit.is_ground() or lit.is_builtin()):
+            self._instances(rule, index + 1, binding, results, possibilities)
+            return
+        # Otherwise, find instances in this theory
+        if lit.tablename() in possibilities:
+            options = possibilities[lit.tablename()]
+        else:
+            options = self.head_index(lit.tablename(), lit.plug(binding))
+        for data in options:
+            self._print_note(lit, binding, 0, "Trying: %s" % repr(data))
+            undo = unify.match_atoms(lit, binding, self.head(data))
+            if undo is None:  # no unifier
+                continue
+            self._print_exit(lit, binding, 0)
+            # recurse on the rest of the literals in the rule
+            self._instances(rule, index + 1, binding, results, possibilities)
+            if undo is not None:
+                unify.undo_all(undo)
+            self._print_redo(lit, binding, 0)
+        self._print_fail(lit, binding, 0)

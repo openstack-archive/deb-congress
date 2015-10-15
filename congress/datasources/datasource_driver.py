@@ -16,13 +16,15 @@
 # option.  Create PollingDataSourceDriver subclass to handle the polling
 # logic.
 
-import time
+import eventlet
+from oslo_log import log as logging
+import six
 
 from congress.datalog import compile
+from congress.datalog import utility
+from congress.datasources import datasource_utils as ds_utils
 from congress.dse import deepsix
 from congress import exception
-from congress.openstack.common import log as logging
-from congress.policy_engines import agnostic
 from congress import utils
 
 import datetime
@@ -93,10 +95,16 @@ class DataSourceDriver(deepsix.deepSix):
       set 'parent-col-name' otherwise the default name for the column will be
       'parent_key'.
 
-      Instead, if 'id-col' is specified, the translator will prepend a unique
-      id column to each row where the id's value is the hash of the remaining
-      columns for that row.  Using both parent-key and id-col at the same time
-      is redudant, so DataSourceDriver will reject that configuration.
+      Instead, if 'id-col' is specified, the translator will prepend a
+      generated id column to each row.  The 'id-col' value can be either a
+      string indicating an id should be generated based on the hash of
+      the remaining fields, or it is a function that takes as argument
+      the object and returns an ID as a string or number.  If 'id-col' is
+      specified with a sub-translator, that value is included as a column
+      in the top-level translator's table.
+
+      Using both parent-key and id-col at the same time is redudant, so
+      DataSourceDriver will reject that configuration.
 
       The example translator expects an object such as:
         {'field1': 123, 'field2': 456}
@@ -231,6 +239,7 @@ class DataSourceDriver(deepsix.deepSix):
     TABLE_NAME = 'table-name'
     PARENT_KEY = 'parent-key'
     ID_COL = 'id-col'
+    ID_COL_NAME = 'id-col'
     SELECTOR_TYPE = 'selector-type'
     FIELD_TRANSLATORS = 'field-translators'
     FIELDNAME = 'fieldname'
@@ -263,25 +272,47 @@ class DataSourceDriver(deepsix.deepSix):
         self.initialized = False
         if args is None:
             args = dict()
+
         if 'poll_time' in args:
-            self.poll_time = int(args['poll_time'])
+            poll_time = int(args['poll_time'])
         else:
-            self.poll_time = 10
-        # default to open-stack credentials, since that's the common case
+            poll_time = 10
+
+        # a number of tests rely on polling being disabled if there's no inbox
+        # provided to the deepSix base class so clamp to zero here in that case
+        self.poll_time = poll_time if inbox is not None else 0
+
         self.last_poll_time = None
         self.last_error = None
         self.number_of_updates = 0
+        self.poller_greenthread = None
+        self.refresh_request_queue = eventlet.Queue(maxsize=1)
 
         # a dictionary from tablename to the SET of tuples, both currently
         #  and in the past.
         self.prior_state = dict()
         self.state = dict()
+        # Store raw state (result of API calls) so that we can
+        #   avoid re-translating and re-sending if no changes occurred.
+        #   Because translation is not deterministic (we're generating
+        #   UUIDs), it's hard to tell if no changes occurred
+        #   after performing the translation.
+        self.raw_state = dict()
 
         # set of translators that are registered with datasource.
         self._translators = []
 
         # The schema for a datasource driver.
         self._schema = {}
+
+        # record table dependence for deciding which table should be cleaned up
+        # when this type data is deleted entirely from datasource.
+        # the value is infered from the translators automatically when
+        # registering translators
+        # key: root table name
+        # value: all related table name list(include: root table)
+        # eg: {'ports': ['ports', 'fixed_ips', 'security_group_port_bindings']}
+        self._table_deps = {}
 
         # setup translators here for datasource drivers that set TRANSLATORS.
         for translator in self.TRANSLATORS:
@@ -290,6 +321,42 @@ class DataSourceDriver(deepsix.deepSix):
         # Make sure all data structures above are set up *before* calling
         #   this because it will publish info to the bus.
         super(DataSourceDriver, self).__init__(name, keys, inbox, datapath)
+
+    def _init_end_start_poll(self):
+        """Mark initializes the success and launch poll loop.
+
+        Every instance of this class must call the method at the end of
+        __init__()
+        """
+        LOG.debug("start to poll from datasource %s", self.name)
+        self.poller_greenthread = eventlet.spawn(self.poll_loop,
+                                                 self.poll_time)
+        self.initialized = True
+
+    def cleanup(self):
+        """Cleanup this object in preparation for elimination."""
+        if hasattr(self, "poller_greenthread"):
+            eventlet.greenthread.kill(self.poller_greenthread)
+            self.log_info("killed poller thread")
+
+    def _make_tmp_state(self, root_table_name, row_data):
+        tmp_state = {}
+        # init all related tables to empty set
+        for table in self._table_deps[root_table_name]:
+            tmp_state.setdefault(table, set())
+        # add changed data
+        for table, row in row_data:
+            if table in tmp_state:
+                tmp_state[table].add(row)
+            else:
+                LOG.warning('table %s is undefined in translators', table)
+        return tmp_state
+
+    def _update_state(self, root_table_name, row_data):
+        tmp_state = self._make_tmp_state(root_table_name, row_data)
+        # just update the changed data for self.state
+        for table in tmp_state:
+            self.state[table] = tmp_state[table]
 
     def _get_translator_params(self, translator_type):
         if translator_type is self.HDICT:
@@ -315,24 +382,24 @@ class DataSourceDriver(deepsix.deepSix):
                 'Specify at most one of %s or %s' %
                 (self.PARENT_KEY, self.ID_COL))
 
-    def _validate_hdict_type(self, translator):
+    def _validate_hdict_type(self, translator, related_tables):
         # validate field-translators
         field_translators = translator[self.FIELD_TRANSLATORS]
         for field_translator in field_translators:
             self.check_params(field_translator.keys(),
                               self.FIELD_TRANSLATOR_PARAMS)
             subtranslator = field_translator[self.TRANSLATOR]
-            self._validate_translator(subtranslator)
+            self._validate_translator(subtranslator, related_tables)
 
-    def _validate_list_type(self, translator):
+    def _validate_list_type(self, translator, related_tables):
         if self.VAL_COL not in translator:
             raise exception.InvalidParamException(
                 "Param (%s) must be in translator" % self.VAL_COL)
 
         subtranslator = translator[self.TRANSLATOR]
-        self._validate_translator(subtranslator)
+        self._validate_translator(subtranslator, related_tables)
 
-    def _validate_vdict_type(self, translator):
+    def _validate_vdict_type(self, translator, related_tables):
         if self.KEY_COL not in translator:
             raise exception.InvalidParamException(
                 "Param (%s) must be in translator" % self.KEY_COL)
@@ -341,9 +408,9 @@ class DataSourceDriver(deepsix.deepSix):
                 "Param (%s) must be in translator" % self.VAL_COL)
 
         subtranslator = translator[self.TRANSLATOR]
-        self._validate_translator(subtranslator)
+        self._validate_translator(subtranslator, related_tables)
 
-    def _validate_by_translation_type(self, translator):
+    def _validate_by_translation_type(self, translator, related_tables):
         translation_type = translator[self.TRANSLATION_TYPE]
 
         # validate that only valid params are present
@@ -356,15 +423,18 @@ class DataSourceDriver(deepsix.deepSix):
             if table_name in self.state:
                 raise exception.DuplicateTableName(
                     'table (%s) used twice' % table_name)
+            # init state
             self.state[table_name] = set()
+            # build table dependence
+            related_tables.append(table_name)
         if translation_type is self.HDICT:
-            self._validate_hdict_type(translator)
+            self._validate_hdict_type(translator, related_tables)
         elif translation_type is self.LIST:
-            self._validate_list_type(translator)
+            self._validate_list_type(translator, related_tables)
         elif translation_type is self.VDICT:
-            self._validate_vdict_type(translator)
+            self._validate_vdict_type(translator, related_tables)
 
-    def _validate_translator(self, translator):
+    def _validate_translator(self, translator, related_tables):
         translation_type = translator.get(self.TRANSLATION_TYPE)
 
         if self.TRANSLATION_TYPE not in translator:
@@ -376,11 +446,14 @@ class DataSourceDriver(deepsix.deepSix):
             msg = ("Translation Type %s not a valid transltion-type %s" % (
                    translation_type, self.VALID_TRANSLATION_TYPES))
             raise exception.InvalidTranslationType(msg)
-        self._validate_by_translation_type(translator)
+        self._validate_by_translation_type(translator, related_tables)
 
     def register_translator(self, translator):
         """Registers translator with congress and validates its schema."""
-        self._validate_translator(translator)
+        related_tables = []
+        if self.TABLE_NAME in translator:
+            self._table_deps[translator[self.TABLE_NAME]] = related_tables
+        self._validate_translator(translator, related_tables)
         self._translators.append(translator)
         self._schema.update(self._get_schema(translator, {}))
 
@@ -401,7 +474,7 @@ class DataSourceDriver(deepsix.deepSix):
 
         columns = []
         if id_col is not None:
-            columns.append(id_col)
+            columns.append(cls._id_col_name(id_col))
         elif parent_key is not None:
             parent_col_name = translator.get(cls.PARENT_COL_NAME,
                                              cls.PARENT_KEY_COL_NAME)
@@ -437,7 +510,7 @@ class DataSourceDriver(deepsix.deepSix):
         # Construct the schema for this table.
         new_schema = (key_col,)
         if id_col:
-            new_schema = (id_col,) + new_schema
+            new_schema = (cls._id_col_name(id_col),) + new_schema
         elif parent_key:
             parent_col_name = translator.get(cls.PARENT_COL_NAME,
                                              cls.PARENT_KEY_COL_NAME)
@@ -461,7 +534,7 @@ class DataSourceDriver(deepsix.deepSix):
             raise exception.InvalidParamException(
                 "table %s already in schema" % tablename)
         if id_col:
-            schema[tablename] = (id_col, value_col)
+            schema[tablename] = (cls._id_col_name(id_col), value_col)
         elif parent_key:
             parent_col_name = translator.get(cls.PARENT_COL_NAME,
                                              cls.PARENT_KEY_COL_NAME)
@@ -584,6 +657,31 @@ class DataSourceDriver(deepsix.deepSix):
                                  (str(selector),))
 
     @classmethod
+    def _compute_id(cls, id_col, obj, args):
+        """Compute the ID for an object and return it."""
+        # ID is computed by a datasource-provided function
+        if hasattr(id_col, '__call__'):
+            try:
+                value = id_col(obj)
+            except Exception as e:
+                raise exception.CongressException(
+                    "Error during ID computation: %s" % str(e))
+        # ID is generated via a hash
+        else:
+            value = cls._compute_hash(args)
+        assert (isinstance(value, six.string_types) or
+                isinstance(value, (six.integer_types, float))), (
+            "ID must be string or number")
+        return value
+
+    @classmethod
+    def _id_col_name(cls, id_col):
+        """Compute name for the ID column given id_col value."""
+        if isinstance(id_col, six.string_types):
+            return id_col
+        return cls.ID_COL_NAME
+
+    @classmethod
     def _compute_hash(cls, obj):
         # This might turn out to be expensive.
 
@@ -628,7 +726,7 @@ class DataSourceDriver(deepsix.deepSix):
             converted_values = tuple([cls._extract_value(o, extract_fn)
                                       for o in obj])
             if id_col:
-                h = cls._compute_hash(converted_values)
+                h = cls._compute_id(id_col, obj, converted_values)
                 new_tuples = [(table, (h, v)) for v in converted_values]
             elif parent_key:
                 h = None
@@ -663,7 +761,7 @@ class DataSourceDriver(deepsix.deepSix):
                 row_hashes.append(row_hash)
 
             if id_col:
-                h = cls._compute_hash(row_hashes)
+                h = cls._compute_id(id_col, o, row_hashes)
             else:
                 h = None
 
@@ -692,7 +790,7 @@ class DataSourceDriver(deepsix.deepSix):
                                       cls._extract_value(v, extract_fn))
                                      for k, v in obj.items()])
             if id_col:
-                h = cls._compute_hash(converted_items)
+                h = cls._compute_id(id_col, obj, converted_items)
                 new_tuples = [(table, (h,) + i) for i in converted_items]
             elif parent_key:
                 h = None
@@ -729,7 +827,7 @@ class DataSourceDriver(deepsix.deepSix):
 
             h = None
             if id_col:
-                h = cls._compute_hash(vdict_rows)
+                h = cls._compute_id(id_col, obj, vdict_rows)
             for vdict_row in vdict_rows:
                 if id_col:
                     new_tuples.append((table, (h,) + vdict_row))
@@ -796,10 +894,11 @@ class DataSourceDriver(deepsix.deepSix):
                 if cls.need_column_for_subtable_id(subtranslator):
                     hdict_row[col_name] = row_hash
 
-        return cls._format_results_to_hdict(new_results, translator, hdict_row)
+        return cls._format_results_to_hdict(
+            obj, new_results, translator, hdict_row)
 
     @classmethod
-    def _format_results_to_hdict(cls, results, translator, hdict_row):
+    def _format_results_to_hdict(cls, obj, results, translator, hdict_row):
         """Convert hdict row to translator format for hdict.
 
         results - table row entries from subtables of a translator.
@@ -817,7 +916,7 @@ class DataSourceDriver(deepsix.deepSix):
             if col in hdict_row:
                 new_row.append(utils.value_to_congress(hdict_row[col]))
         if id_col:
-            h = cls._compute_hash(new_row)
+            h = cls._compute_id(id_col, obj, new_row)
             new_row = (h,) + tuple(new_row)
         elif parent_key:
             h = None
@@ -926,14 +1025,6 @@ class DataSourceDriver(deepsix.deepSix):
         self.prior_state = dict(self.state)  # copying self.state
         self.last_error = None  # non-None only when last poll errored
         try:
-            # Avoid race condition where poll() is called before object
-            #   has finished initializing.  Every instance of this class
-            #   must set self.initialized to True at the very end of
-            #   __init__()
-            # TODO(thinrichs): figure out how to remove this
-            while not self.initialized:
-                self.log("Not yet initialized: waiting to poll.")
-                time.sleep(1)
             self.update_from_datasource()  # sets self.state
             tablenames = set(self.state.keys()) | set(self.prior_state.keys())
             for tablename in tablenames:
@@ -984,11 +1075,11 @@ class DataSourceDriver(deepsix.deepSix):
         result = []
         for row in to_add:
             formula = compile.Literal.create_from_table_tuple(dataindex, row)
-            event = agnostic.Event(formula=formula, insert=True)
+            event = compile.Event(formula=formula, insert=True)
             result.append(event)
         for row in to_del:
             formula = compile.Literal.create_from_table_tuple(dataindex, row)
-            event = agnostic.Event(formula=formula, insert=False)
+            event = compile.Event(formula=formula, insert=False)
             result.append(event)
         if len(result) == 0:
             # Policy engine expects an empty update to be an init msg
@@ -997,24 +1088,10 @@ class DataSourceDriver(deepsix.deepSix):
             result = None
             text = "None"
         else:
-            text = agnostic.iterstr(result)
+            text = utility.iterstr(result)
         self.log("prepush_processor for <%s> returning with %s items",
                  dataindex, text)
         return result
-
-    def d6run(self):
-        # This method is run by DSE, so don't sleep here--it'll delay message
-        #   handling for this deepsix instance.
-        if self.poll_time:  # setting to 0/False/None means auto-polling is off
-            if self.last_poll_time is None:
-                self.poll()
-                self.log("finished polling")
-            else:
-                now = datetime.datetime.now()
-                diff = now - self.last_poll_time
-                seconds = diff.seconds + diff.days * 24 * 3600
-                if seconds > self.poll_time:
-                    self.poll()
 
     def empty_credentials(self):
         return {'username': '',
@@ -1022,24 +1099,40 @@ class DataSourceDriver(deepsix.deepSix):
                 'auth_url': '',
                 'tenant_name': ''}
 
-    def reqhandler(self, msg):
-        """Request handler.
+    def request_refresh(self):
+        """Request a refresh of this service's data."""
+        try:
+            self.refresh_request_queue.put(None)
+        except eventlet.queue.Full:
+            # if the queue is full, just ignore it, the poller thread will
+            # get to it eventually
+            pass
 
-        To handle messages with 'req' type
+    def block_unless_refresh_requested(self):
+        self.refresh_request_queue.get()
+        self.poll()
+
+    def poll_loop(self, poll_time):
+        """Entrypoint for the datasource driver's poller greenthread.
+
+        Triggers polling every *poll_time* seconds or after *request_refresh*
+        is called.
+
+        :param poll_time: is the amount of time (in seconds) to wait between
+        polling rounds.
         """
-        LOG.info('%s:: reqhandler: %s', self.name, msg)
-        action = msg.header.get('dataindex')
-        action_args = msg.body
-        # e.g. action_args = {u'positional': [u'p_arg1', u'p_arg2'],
-        #                     u'named': {u'name1': u'n_arg1'}}
-
-        # TODO(stevenldt): should make this a generic handler for different
-        # requests.  For now, only action execution utilizes this call.
-        self.reply(action)
-        if hasattr(self, 'execute'):
-            self.execute(action, action_args)
-        else:
-            LOG.debug('driver %s has no "execute" method' % self.name)
+        while self.running:
+            if poll_time:
+                if self.last_poll_time is None:
+                    self.poll()
+                else:
+                    try:
+                        with eventlet.Timeout(poll_time):
+                            self.block_unless_refresh_requested()
+                    except eventlet.Timeout:
+                        self.poll()
+            else:
+                self.block_unless_refresh_requested()
 
 
 class ExecutionDriver(object):
@@ -1052,6 +1145,55 @@ class ExecutionDriver(object):
     how the action is used: whether defining it as a method and calling it
     or passing it as an API call to a service.
     """
+
+    def __init__(self):
+        # a list of action methods which can be used with "execute"
+        self.executable_methods = {}
+
+    def reqhandler(self, msg):
+        """Request handler.
+
+        The handler calls execute method.
+        """
+        LOG.info('%s:: reqhandler: %s', self.name, msg)
+        action = msg.header.get('dataindex')
+        action_args = msg.body
+        # e.g. action_args = {u'positional': [u'p_arg1', u'p_arg2'],
+        #                     u'named': {u'name1': u'n_arg1'}}
+
+        self.reply(action)
+        try:
+            self.execute(action, action_args)
+        except Exception as e:
+            LOG.exception(e.message)
+
+    def inspect_builtin_methods(self, client, api_prefix):
+        """Inspect client to get supported builtin methods
+
+        param client: the datasource driver client
+        param api_prefix: the filter used to filter methods
+        """
+        builtin = ds_utils.inspect_methods(client, api_prefix)
+        for method in builtin:
+            self.add_executable_method(method['name'], method['args'],
+                                       method['desc'])
+
+    def add_executable_method(self, method_name, method_args, method_desc=""):
+        """Add executable method information.
+
+        param method_name: The name of the method to add
+        param method_args: List of arguments and description of the method,
+            e.g. [{'name': 'arg1', 'description': 'arg1'},
+            {'name': 'arg2', 'description': 'arg2'}]
+        param method_desc: Description of the method
+        """
+
+        if method_name not in self.executable_methods:
+            self.executable_methods[method_name] = [method_args, method_desc]
+
+    def is_executable(self, method):
+        return True if method.__name__ in self.executable_methods else False
+
     def _get_method(self, client, method_name):
         method = reduce(getattr, method_name.split('.'), client)
         return method
@@ -1067,6 +1209,33 @@ class ExecutionDriver(object):
             method(*positional_args, **named_args)
         except Exception as e:
             LOG.exception(e.message)
+            raise exception.CongressException(
+                "driver %s tries to execute %s on arguments %s but "
+                "the method isn't accepted as an executable method."
+                % (self.name, action, action_args))
+
+    def get_actions(self):
+        """Return all supported actions of a datasource driver.
+
+        Action should be a service API or a user-defined function.
+        This method should return a dict for all supported actions,
+        together with optional descriptions for each action and its
+        required/supported arguments. E.g.
+        {'results': [{'name': 'execute1',
+                      'args': [{"name": 'arg1', "description": "None"},
+                               {"name": 'arg2', "description": "None"}],
+                      'description': 'execute function 1'}]
+        }
+        """
+        actions = []
+        # order by name so that use can find out actions easily
+        method_names = self.executable_methods.keys()
+        method_names.sort()
+        for method in method_names:
+            actions.append({'name': method,
+                            'args': self.executable_methods[method][0],
+                            'description': self.executable_methods[method][1]})
+        return {'results': actions}
 
     def execute(self, action, action_args):
         """This method must be implemented by each driver.
@@ -1078,5 +1247,22 @@ class ExecutionDriver(object):
             'named': {'key1': 'value1', 'key2': 'value2'}}
         """
         raise exception.CongressException(
-            'Action execution handler is not implemented in driver %s'
-            % self.name)
+            'driver %s has no "execute" method but was asked to '
+            'execute %s on arguments %s' % (self.name, action, action_args)
+        )
+
+    def _convert_args(self, positional_args):
+        """Convert positional args to optional/named args.
+
+        :param <list> positional_args: items are assumed being
+        ordered as ['key1', 'value1', 'key2', 'value2',].
+        :return <dict>: {'key1': 'value1', 'key2': 'value2'}
+        """
+        if len(positional_args) % 2 != 0:
+            raise exception.InvalidParamException(
+                '%s must be in pairs to convert to optional/named args'
+                % positional_args)
+        named_args = {}
+        for key, val in zip(*[iter(positional_args)] * 2):
+            named_args.update({key: val})
+        return named_args

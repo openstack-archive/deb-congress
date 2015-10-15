@@ -28,13 +28,13 @@ try:
 except ImportError:
     pass
 
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log as logging
 import requests
 
 from congress.datasources import constants
 from congress.datasources import datasource_driver
-from congress.managers.datasource import DataSourceManager
-from congress.openstack.common import log as logging
+from congress.managers import datasource as datasource_mgr
 
 LOG = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ def d6service(name, keys, inbox, datapath, args):
     return PlexxiDriver(name, keys, inbox, datapath, args)
 
 
-class PlexxiDriver(datasource_driver.DataSourceDriver):
+class PlexxiDriver(datasource_driver.DataSourceDriver,
+                   datasource_driver.ExecutionDriver):
     HOSTS = "hosts"
     HOST_MACS = HOSTS + '.macs'
     HOST_GUESTS = HOSTS + '.guests'
@@ -63,6 +64,7 @@ class PlexxiDriver(datasource_driver.DataSourceDriver):
     def __init__(self, name='', keys='', inbox=None, datapath=None, args=None,
                  session=None):
         super(PlexxiDriver, self).__init__(name, keys, inbox, datapath, args)
+        datasource_driver.ExecutionDriver.__init__(self)
         self.exchange = session
         self.creds = args
         self.raw_state = {}
@@ -92,7 +94,7 @@ class PlexxiDriver(datasource_driver.DataSourceDriver):
             else:
                 self.keystone_url = str(cfg.CONF.keystone_authtoken.auth_uri)
                 self.keystoneauth()
-        self.initialized = True
+        self._init_end_start_poll()
 
     @staticmethod
     def get_datasource_info():
@@ -510,7 +512,7 @@ class PlexxiDriver(datasource_driver.DataSourceDriver):
             raise Exception(requests.exceptions.ConnectionError(msg))
 
     def keystoneauth(self):
-        """Aquire a keystone auth token for API calls
+        """Acquire a keystone auth token for API calls
 
         Called when congress is running with keystone as the authentication
         method.This provides the driver a keystone token that is then placed
@@ -556,7 +558,7 @@ class PlexxiDriver(datasource_driver.DataSourceDriver):
                     return False
             return True
         except Exception:
-            LOG.exception("An error has occured when accessing the " +
+            LOG.exception("An error has occurred when accessing the " +
                           "Congress API.All automated API calls have been " +
                           "disabled.")
             self.unique_names = False
@@ -570,7 +572,7 @@ class PlexxiDriver(datasource_driver.DataSourceDriver):
         VMs that have the same name in the Plexxi table and the Nova Table.
         """
         try:
-            datasources = DataSourceManager.get_datasources()
+            datasources = datasource_mgr.DataSourceManager.get_datasources()
             for datasource in datasources:
                 if datasource['driver'] == 'nova':
                     repeated_name_rule = ('{"rule": "RepeatedName' +

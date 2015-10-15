@@ -22,9 +22,9 @@ import json
 import shutil
 import tempfile
 
-from oslo.config import cfg
-
-from congress.openstack.common import log as logging
+from oslo_config import cfg
+from oslo_log import log as logging
+import six
 
 LOG = logging.getLogger(__name__)
 
@@ -52,20 +52,19 @@ def tempdir(**kwargs):
 
 
 def value_to_congress(value):
-    if isinstance(value, basestring):
+    if isinstance(value, six.string_types):
         # TODO(ayip): This throws away high unicode data because congress does
         # not have full support for unicode yet.  We'll need to fix this to
         # handle unicode coming from datasources.
         try:
-            unicode(value).encode('ascii')
+            six.text_type(value).encode('ascii')
         except UnicodeEncodeError:
             LOG.warning('Ignoring non-ascii characters')
-        return unicode(value).encode('ascii', 'ignore')
+        return six.text_type(value).encode('ascii', 'ignore')
     # Check for bool before int, because True and False are also ints.
     elif isinstance(value, bool):
         return str(value)
-    elif (isinstance(value, int) or
-          isinstance(value, long) or
+    elif (isinstance(value, six.integer_types) or
           isinstance(value, float)):
         return value
     return str(value)

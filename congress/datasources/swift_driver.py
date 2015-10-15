@@ -12,10 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+from oslo_log import log as logging
 import swiftclient.service
 
 from congress.datasources import datasource_driver
-from congress.openstack.common import log as logging
+from congress.datasources import datasource_utils as ds_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -25,7 +26,9 @@ def d6service(name, keys, inbox, datapath, args):
     return SwiftDriver(name, keys, inbox, datapath, args)
 
 
-class SwiftDriver(datasource_driver.DataSourceDriver):
+class SwiftDriver(datasource_driver.DataSourceDriver,
+                  datasource_driver.ExecutionDriver):
+
     CONTAINERS = "containers"
     OBJECTS = "objects"
 
@@ -58,20 +61,34 @@ class SwiftDriver(datasource_driver.DataSourceDriver):
         if args is None:
             args = self.empty_credentials()
         super(SwiftDriver, self).__init__(name, keys, inbox, datapath, args)
-        self.swift_service = swiftclient.service.SwiftService()
-
-        self.raw_state = {}
-        self.initialized = True
+        datasource_driver.ExecutionDriver.__init__(self)
+        options = self.get_swift_credentials_v1(args)
+        self.swift_service = swiftclient.service.SwiftService(options)
+        self.inspect_builtin_methods(self.swift_service, 'swiftclient.service')
+        self._init_end_start_poll()
 
     @staticmethod
     def get_datasource_info():
-        # FIXME(arosen): Figure out how swift actually does auth?
+        # TODO(zhenzanz): This is verified with keystoneauth for swift.
+        # Do we need to support other Swift auth systems?
+        # http://docs.openstack.org/developer/swift/overview_auth.html
         result = {}
         result['id'] = 'swift'
         result['description'] = ('Datasource driver that interfaces with '
                                  'swift.')
-        result['config'] = {}
+        result['config'] = ds_utils.get_openstack_required_config()
+        result['secret'] = ['password']
         return result
+
+    def get_swift_credentials_v1(self, creds):
+        # Check swiftclient/service.py _default_global_options for more
+        # auth options. But these 4 options seem to be enough.
+        options = {}
+        options['os_username'] = creds['username']
+        options['os_password'] = creds['password']
+        options['os_tenant_name'] = creds['tenant_name']
+        options['os_auth_url'] = creds['auth_url']
+        return options
 
     def update_from_datasource(self):
         '''Read and populate.
@@ -79,19 +96,25 @@ class SwiftDriver(datasource_driver.DataSourceDriver):
         Read data from swift and populate the policy engine
         tables with current state as specified by translators
         '''
+        containers, objects = self._get_containers_and_objects()
+
+        LOG.debug("Containers Lists--->: %s" % containers)
+        LOG.debug("Object Lists--->: %s " % objects)
+        self._translate_containers(containers)
+        self._translate_objects(objects)
+        LOG.debug("CONTAINERS: %s" % str(self.state[self.CONTAINERS]))
+        LOG.debug("OBJECTS: %s" % str(self.state[self.OBJECTS]))
+
+    def _get_containers_and_objects(self):
         container_list = self.swift_service.list()
-        object_list = []
-        self.obj_list = []
         cont_list = []
         objects = []
         containers = []
-
         LOG.debug("Swift obtaining containers List")
         for stats in container_list:
             containers = stats['listing']
             for item in containers:
                 cont_list.append(item['name'])
-
         LOG.debug("Swift obtaining objects List")
         for container in cont_list:
             object_list = self.swift_service.list(container)
@@ -101,52 +124,27 @@ class SwiftDriver(datasource_driver.DataSourceDriver):
                     obj['container_name'] = container
                 for obj in item_list:
                     objects.append(obj)
+        return containers, objects
 
-        LOG.debug("Containers Lists--->: %s" % containers)
-        LOG.debug("Object Lists--->: %s " % objects)
-
-        if ('containers' not in self.raw_state or containers !=
-                self.raw_state['containers']):
-            self.raw_state['containers'] = containers
-            self._translate_containers(containers)
-
-        if ('objects' not in self.raw_state or objects !=
-                self.raw_state['objects']):
-            self.raw_state['objects'] = objects
-            self._translate_objects(objects)
-
+    @ds_utils.update_state_on_changed(CONTAINERS)
     def _translate_containers(self, obj):
-        """Translate the containers represented by OBJ into tables.
-
-        Assign self.state[tablename] for the table names
-        generated from OBJ: CONTAINERS.
-        """
+        """Translate the containers represented by OBJ into tables."""
         row_data = SwiftDriver.convert_objs(obj,
                                             self.containers_translator)
+        return row_data
 
-        container_tables = (self.CONTAINERS)
-        self.state[container_tables] = set()
-        for table, row in row_data:
-            assert table in container_tables
-            self.state[table].add(row)
-
-        LOG.debug("CONTAINERS: %s" % str(self.state[self.CONTAINERS]))
-        return tuple(self.state[self.CONTAINERS])
-
+    @ds_utils.update_state_on_changed(OBJECTS)
     def _translate_objects(self, obj):
-        """Translate the objects represented by OBJ into tables.
-
-        Assign self.state[tablename] for the table names
-        generated from OBJ: OBJECTS.
-        """
+        """Translate the objects represented by OBJ into tables."""
         row_data = SwiftDriver.convert_objs(obj,
                                             self.objects_translator)
+        return row_data
 
-        object_tables = (self.OBJECTS)
-        self.state[object_tables] = set()
-        for table, row in row_data:
-            assert table in object_tables
-            self.state[table].add(row)
-
-        LOG.debug("OBJECTS: %s" % str(self.state[self.OBJECTS]))
-        return tuple(self.state[self.OBJECTS])
+    def execute(self, action, action_args):
+        """Overwrite ExecutionDriver.execute()."""
+        # action can be written as a method or an API call.
+        func = getattr(self, action, None)
+        if func and self.is_executable(func):
+            func(action_args)
+        else:
+            self._execute_api(self.swift_service, action, action_args)

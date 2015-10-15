@@ -14,10 +14,11 @@
 #
 from ironicclient import client
 import keystoneclient.v2_0.client as ksclient
+from oslo_log import log as logging
+import six
 
-from congress.datasources.datasource_driver import DataSourceDriver
-from congress.datasources import datasource_utils
-from congress.openstack.common import log as logging
+from congress.datasources import datasource_driver
+from congress.datasources import datasource_utils as ds_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -27,19 +28,20 @@ def d6service(name, keys, inbox, datapath, args):
     return IronicDriver(name, keys, inbox, datapath, args)
 
 
-class IronicDriver(DataSourceDriver):
+class IronicDriver(datasource_driver.DataSourceDriver,
+                   datasource_driver.ExecutionDriver):
     CHASSISES = "chassises"
     NODES = "nodes"
-    NODEPROPERTIES = "node_properties"
+    NODE_PROPERTIES = "node_properties"
     PORTS = "ports"
     DRIVERS = "drivers"
-    ACTIVEHOSTS = "active_hosts"
+    ACTIVE_HOSTS = "active_hosts"
 
     # This is the most common per-value translator, so define it once here.
     value_trans = {'translation-type': 'VALUE'}
 
     def safe_id(x):
-        if isinstance(x, basestring):
+        if isinstance(x, six.string_types):
             return x
         try:
             return x['id']
@@ -73,7 +75,7 @@ class IronicDriver(DataSourceDriver):
              {'fieldname': 'maintenance', 'translator': value_trans},
              {'fieldname': 'properties', 'translator':
                                          {'translation-type': 'HDICT',
-                                          'table-name': 'node_properties',
+                                          'table-name': NODE_PROPERTIES,
                                           'parent-key': 'id',
                                           'parent-col-name': 'properties',
                                           'selector-type': 'DICT_SELECTOR',
@@ -118,7 +120,7 @@ class IronicDriver(DataSourceDriver):
             ({'fieldname': 'name', 'translator': value_trans},
              {'fieldname': 'hosts', 'translator':
                                     {'translation-type': 'LIST',
-                                     'table-name': 'active_hosts',
+                                     'table-name': ACTIVE_HOSTS,
                                      'parent-key': 'name',
                                      'parent-col-name': 'name',
                                      'val-col': 'hosts',
@@ -130,10 +132,11 @@ class IronicDriver(DataSourceDriver):
 
     def __init__(self, name='', keys='', inbox=None, datapath=None, args=None):
         super(IronicDriver, self).__init__(name, keys, inbox, datapath, args)
+        datasource_driver.ExecutionDriver.__init__(self)
         self.creds = self.get_ironic_credentials(args)
         self.ironic_client = client.get_client(**self.creds)
-
-        self.initialized = True
+        self.inspect_builtin_methods(self.ironic_client, 'ironicclient.v1.')
+        self._init_end_start_poll()
 
     @staticmethod
     def get_datasource_info():
@@ -141,7 +144,7 @@ class IronicDriver(DataSourceDriver):
         result['id'] = 'ironic'
         result['description'] = ('Datasource driver that interfaces with '
                                  'OpenStack bare metal aka ironic.')
-        result['config'] = datasource_utils.get_openstack_required_config()
+        result['config'] = ds_utils.get_openstack_required_config()
         result['secret'] = ['password']
         return result
 
@@ -162,53 +165,56 @@ class IronicDriver(DataSourceDriver):
         return d
 
     def update_from_datasource(self):
-        self.state = {}
-        # TODO(zhenzanz): this is a workaround. The ironic client should
-        # handle 401 error.
         try:
-            chassises = self.ironic_client.chassis.list(
-                detail=True, limit=0)
+            chassises = self.ironic_client.chassis.list(detail=True, limit=0)
             self._translate_chassises(chassises)
-            self._translate_nodes(self.ironic_client.node.list(detail=True,
-                                                               limit=0))
-            self._translate_ports(self.ironic_client.port.list(detail=True,
-                                                               limit=0))
-            self._translate_drivers(self.ironic_client.driver.list())
+
+            nodes = self.ironic_client.node.list(detail=True, limit=0)
+            self._translate_nodes(nodes)
+
+            ports = self.ironic_client.port.list(detail=True, limit=0)
+            self._translate_ports(ports)
+
+            drivers = self.ironic_client.driver.list()
+            self._translate_drivers(drivers)
         except Exception as e:
+            # TODO(zhenzanz): this is a workaround. The ironic client should
+            # handle 401 error.
             if e.http_status == 401:
                 keystone = ksclient.Client(**self.creds)
                 self.ironic_client.http_client.auth_token = keystone.auth_token
             else:
                 raise e
 
+    @ds_utils.update_state_on_changed(CHASSISES)
     def _translate_chassises(self, obj):
         row_data = IronicDriver.convert_objs(obj,
                                              IronicDriver.chassises_translator)
-        self.state[self.CHASSISES] = set()
-        for table, row in row_data:
-            assert table == self.CHASSISES
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(NODES)
     def _translate_nodes(self, obj):
         row_data = IronicDriver.convert_objs(obj,
                                              IronicDriver.nodes_translator)
-        self.state[self.NODES] = set()
-        self.state[self.NODEPROPERTIES] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(PORTS)
     def _translate_ports(self, obj):
         row_data = IronicDriver.convert_objs(obj,
                                              IronicDriver.ports_translator)
-        self.state[self.PORTS] = set()
-        for table, row in row_data:
-            assert table == self.PORTS
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(DRIVERS)
     def _translate_drivers(self, obj):
         row_data = IronicDriver.convert_objs(obj,
                                              IronicDriver.drivers_translator)
-        self.state[self.DRIVERS] = set()
-        self.state[self.ACTIVEHOSTS] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
+
+    def execute(self, action, action_args):
+        """Overwrite ExecutionDriver.execute()."""
+        # action can be written as a method or an API call.
+        func = getattr(self, action, None)
+        if func and self.is_executable(func):
+            func(action_args)
+        else:
+            self._execute_api(self.ironic_client, action, action_args)

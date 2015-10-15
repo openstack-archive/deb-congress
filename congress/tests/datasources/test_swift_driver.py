@@ -36,7 +36,8 @@ class TestSwiftDriver(base.TestCase):
                             'bytes': '2086',
                             'name': 'container2'}]
 
-        container_list = self.driver._translate_containers(containers_data)
+        self.driver._translate_containers(containers_data)
+        container_list = list(self.driver.state[self.driver.CONTAINERS])
         self.assertIsNotNone(container_list)
         self.assertEqual(2, len(container_list))
 
@@ -61,7 +62,8 @@ class TestSwiftDriver(base.TestCase):
                          'content_type': 'application/octet-stream',
                          'container_name': 'container2'}]
 
-        object_list = self.driver._translate_objects(objects_data)
+        self.driver._translate_objects(objects_data)
+        object_list = list(self.driver.state[self.driver.OBJECTS])
         self.assertIsNotNone(object_list)
         self.assertEqual(2, len(object_list))
 
@@ -86,3 +88,22 @@ class TestSwiftDriver(base.TestCase):
                               'c2b86044dd50a29d60c0e92e23e3ceea', 'file-2',
                               'application/octet-stream',
                               'container2'), object_list[0])
+
+    def test_execute(self):
+        class SwiftClient(object):
+            def __init__(self):
+                self.testkey = None
+
+            def updateObject(self, arg1):
+                self.testkey = 'arg1=%s' % arg1
+
+        swift_client = SwiftClient()
+        self.driver.swift_service = swift_client
+        api_args = {
+            'positional': ['1']
+        }
+        expected_ans = 'arg1=1'
+
+        self.driver.execute('updateObject', api_args)
+
+        self.assertEqual(swift_client.testkey, expected_ans)

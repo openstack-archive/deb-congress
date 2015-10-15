@@ -27,13 +27,12 @@ import traceback
 import amqprouter
 import eventlet
 eventlet.monkey_patch()
-from oslo.utils import importutils
-from oslo.utils import strutils
-
+from oslo_log import log as logging
+from oslo_utils import importutils
+from oslo_utils import strutils
 
 from congress.dse import d6message
 from congress.dse import deepsix
-from congress.openstack.common import log as logging
 
 
 LOG = logging.getLogger(__name__)
@@ -96,7 +95,6 @@ class d6Cage(deepsix.deepSix):
         self.modules = {}
         self.services = {}
 
-        self.greenThreadPool = eventlet.GreenPool()
         self.greenThreads = []
 
         self.unloadingServices = {}
@@ -117,12 +115,15 @@ class d6Cage(deepsix.deepSix):
             callback=self.updateRoutes,
             interval=5)
 
+        self.router_greenthread = eventlet.spawn(self.router_loop)
+
     def __del__(self):
         # This function gets called when the interpreter deletes the object
         # by the automatic garbage cleanup
         for gt in self.greenThreads:
             eventlet.kill(gt)
 
+        eventlet.kill(self.router_greenthread)
         eventlet.kill(self)
 
     def newConfig(self, msg):
@@ -204,12 +205,16 @@ class d6Cage(deepsix.deepSix):
 
     def deleteservice(self, name):
         self.log_info("deleting service: %s", name)
-        eventlet.greenthread.kill(self.services[name]['object'])
-        self.greenThreads.remove(self.services[name]['object'])
+        obj = self.services[name]['object']
+        if hasattr(obj, "cleanup"):
+            obj.cleanup()
+        eventlet.greenthread.kill(obj)
+        self.greenThreads.remove(obj)
         self.table.remove(name, self.services[name]['inbox'])
         self.table.remove("local." + name, self.services[name]['inbox'])
         self.unsubscribe(name, 'routeKeys')
         del self.services[name]
+        self.log_info("finished deleting service: %s", name)
 
     def createservice(
             self,
@@ -237,11 +242,17 @@ class d6Cage(deepsix.deepSix):
             module = importutils.import_module(congress_expected_module_path)
 
         if not module_driver and moduleName not in sys.modules:
+            self.log_error(
+                "error loading service %s: module %s does not exist",
+                name,
+                moduleName)
             raise DataServiceError(
-                "error loading service " + name +
-                ": module " + moduleName + " does not exist")
+                "error loading service %s: module %s does not exist" %
+                (name, moduleName))
 
         if not module_driver and name in self.services:
+            self.log_error("error loading service '%s': name already in use",
+                           name)
             raise DataServiceError(
                 "error loading service '%s': name already in use"
                 % name)
@@ -260,10 +271,10 @@ class d6Cage(deepsix.deepSix):
         try:
             svcObject = module.d6service(name, keys, inbox, self.dataPath,
                                          args)
-
-            self.greenThreadPool.spawn(svcObject.switch)
             self.greenThreads.append(svcObject)
         except Exception:
+            self.log_error("Error loading service '%s' of module '%s':: \n%s",
+                           name, module, traceback.format_exc())
             raise DataServiceError(
                 "Error loading service '%s' of module '%s':: \n%s"
                 % (name, module, traceback.format_exc()))
@@ -294,6 +305,7 @@ class d6Cage(deepsix.deepSix):
             self.publish('services', self.services)
         except Exception as errmsg:
             del self.services[name]
+            self.log_error("error starting service '%s': %s", name, errmsg)
             raise DataServiceError(
                 "error starting service '%s': %s" % (name, errmsg))
 
@@ -303,7 +315,7 @@ class d6Cage(deepsix.deepSix):
     def getservice(self, id_=None, type_=None, name=None):
         # Returns the first service that matches all non-None parameters.
         for name_, service in self.services.items():
-            if (id_ and service.get('id', None) and id_ != service['id']):
+            if (id_ and (not service.get('id', None) or id_ != service['id'])):
                 continue
             if type_ and type_ != service['type']:
                 continue
@@ -311,6 +323,12 @@ class d6Cage(deepsix.deepSix):
                 continue
             return service
         return None
+
+    def service_object(self, name):
+        if name in self.services:
+            return self.services[name]['object']
+        else:
+            return None
 
     def updateRoutes(self, msg):
         keyData = self.getSubData(msg.correlationId, sender=msg.replyTo)
@@ -379,13 +397,9 @@ class d6Cage(deepsix.deepSix):
         if command == "reload":
             self.d6reload(msg)
 
-    def d6run(self):
-        # LOG.debug("d6cage running d6run()")
-        if not self.dataPath.empty():
-            # LOG.debug("%s has non-empty dataPath: %s",
-            #     self.name, self.dataPath)
+    def router_loop(self):
+        while self.running:
             msg = self.dataPath.get()
-            # self.log_debug("found msg to deliver: %s", msg)
             self.routemsg(msg)
             self.dataPath.task_done()
 

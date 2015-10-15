@@ -15,7 +15,7 @@
 import collections
 import cStringIO
 
-from congress.openstack.common import log as logging
+from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class Proof(object):
     """A single proof.
 
     Differs semantically from Database's
-    Proof in that this verison represents a proof that spans rules,
+    Proof in that this version represents a proof that spans rules,
     instead of just a proof for a single rule.
     """
     def __init__(self, root, children):
@@ -120,10 +120,12 @@ class EventQueue(object):
 ##############################################################################
 
 class Theory(object):
-    def __init__(self, name=None, abbr=None, schema=None, theories=None):
+    def __init__(self, name=None, abbr=None, schema=None, theories=None,
+                 id=None):
         self.schema = schema
         self.theories = theories
         self.kind = None
+        self.id = id
 
         self.tracer = Tracer()
         if name is None:
@@ -139,6 +141,9 @@ class Theory(object):
             self.trace_prefix = self.abbr[0:maxlength]
         else:
             self.trace_prefix = self.abbr + " " * (maxlength - len(self.abbr))
+
+    def set_id(self, id):
+        self.id = id
 
     def initialize_tables(self, tablenames, facts):
         """initialize_tables
@@ -162,6 +167,11 @@ class Theory(object):
                     actual.append(event)
         return actual
 
+    def debug_mode(self):
+        tr = Tracer()
+        tr.trace('*')
+        self.set_tracer(tr)
+
     def set_tracer(self, tracer):
         self.tracer = tracer
 
@@ -184,14 +194,11 @@ class Theory(object):
         """
         raise NotImplementedError()
 
-    def tablenames(self, body_only=False):
+    def tablenames(self, body_only=False, include_builtin=False):
         tablenames = set()
         for rule in self.policy():
-            if body_only:
-                for lit in rule.body:
-                    tablenames.add(lit.tablename())
-            else:
-                tablenames |= rule.tablenames()
+            tablenames |= rule.tablenames(
+                body_only=body_only, include_builtin=include_builtin)
         return tablenames
 
     def __str__(self):
@@ -202,7 +209,7 @@ class Theory(object):
 
     def get_rule(self, ident):
         for p in self.policy():
-            if hasattr(p, 'id') and p.id == ident:
+            if hasattr(p, 'id') and str(p.id) == str(ident):
                 return p
         return
 

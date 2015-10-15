@@ -13,8 +13,9 @@
 #    under the License.
 #
 
+from oslo_log import log as logging
+
 from congress.datasources import datasource_driver
-from congress.openstack.common import log as logging
 
 
 LOG = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class PerformanceTestDriver(datasource_driver.DataSourceDriver):
             name, keys, inbox, datapath, args)
         self.client_data = None
         self.register_translator(PerformanceTestDriver.p_translator)
-        self.initialized = True
+        self._init_end_start_poll()
 
     def update_from_datasource(self):
         if self.client_data is not None:

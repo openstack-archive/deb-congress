@@ -3,9 +3,9 @@
 .. _enforcement:
 
 
-===========================
+==========================
 Monitoring and Enforcement
-===========================
+==========================
 
 Congress is given two inputs: the other cloud
 services in the datacenter and a policy describing the desired state of those
@@ -17,7 +17,7 @@ to ensure that the actual state of the other cloud services is also a desired
 state (i.e. that the other services obey policy).
 
 1. Monitoring
-===========================
+=============
 Recall from :ref:`Policy <policy>` that policy violations are represented with the
 table *error*.  To ask Congress for a list of all policy violations, we
 simply ask it for the contents of the *error* table.
@@ -58,7 +58,7 @@ contents of the error table.
 
 
 2. Proactive Enforcement
-=====================================
+========================
 Often we want policy to be enforced, not just monitored.  *Proactive
 enforcement* is the term we use to mean preventing policy violations before
 they occur.  Proactive enforcement requires having enforcement points in the
@@ -104,7 +104,7 @@ To do a simulation from the command line, you use the following command::
 * <change-sequence>: a string codifying a sequence of insertions and deletions
   of data and rules.  Insertions are denoted by '+' and deletions by '-'
 * <action-policy-name>: the name of another policy of type 'action' describing
-  the effects of any actions occuring in <change-sequence>.  Actions are not
+  the effects of any actions occurring in <change-sequence>.  Actions are not
   necessary and are explained later.  Without actions, this argument can be
   anything (and will in the future be optional).
 
@@ -116,7 +116,7 @@ into nova:servers and then deleting a row out of neutron:security_groups::
         'error(x)’
         'nova:servers+(“uuid1”, “2TB”, “10 GB”)
          neutron:security_groups-(“uuid2”, “alice_default_group”)'
-        null
+        action
 
 **More examples**
 
@@ -129,10 +129,10 @@ Let's begin by creating a policy and adding some key/value pairs for 'p'::
     $ openstack congress policy rule create alice 'p(302, 9)'
 
 Let's also add a statement that says there's an error if a single key has
-multiple values or if any key is assigned 9::
+multiple values or if any value is assigned 9::
 
     $ openstack congress policy rule create classification
-        'error(x) :- p(x, val1), p(x, val2), not eq(val1, val2)'
+        'error(x) :- p(x, val1), p(x, val2), not equal(val1, val2)'
     $ openstack congress policy rule create classification 'error(x) :- p(x, 9)'
 
 
@@ -140,7 +140,7 @@ Each of the following is an example of a simulation query you might want to run.
 
 a) **Basic usage**. Simulate adding the value 5 to key 101 and ask for the contents of p::
 
-    $ openstack congress policy simulate classification 'p(x,y)' 'p+(101, 5)' null
+    $ openstack congress policy simulate classification 'p(x,y)' 'p+(101, 5)' action
     p(101, 0)
     p(101, 5)
     p(202, "abc")
@@ -148,21 +148,21 @@ a) **Basic usage**. Simulate adding the value 5 to key 101 and ask for the conte
 
 b) **Error table**. Simulate adding the value 5 to key 101 and ask for the contents of error::
 
-    $ openstack congress policy simulate classification 'error(x)' 'p+(101, 5)' null
+    $ openstack congress policy simulate classification 'error(x)' 'p+(101, 5)' action
     error(101)
     error(302)
 
 c) **Inserts and Deletes**. Simulate adding the value 5 to key 101 and deleting 0 and ask for the contents of error::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'p+(101, 5) p-(101, 0)' null
+        'p+(101, 5) p-(101, 0)' action
     error(302)
 
 
 d) **Error changes**. Simulate changing the value of key 101 to 9 and query the **change** in the error table::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'p+(101, 9) p-(101, 0)' null --delta
+        'p+(101, 9) p-(101, 0)' action --delta
     error+(101)
 
 
@@ -170,7 +170,7 @@ f) **Multiple error changes**. Simulate changing 101:9, 202:9, 302:1 and query t
 
     $ openstack congress policy simulate classification 'error(x)'
         'p+(101, 9) p-(101, 0) p+(202, 9) p-(202, "abc") p+(302, 1) p-(302, 9)'
-        null --delta
+        action --delta
     error+(202)
     error+(101)
     error-(302)
@@ -180,7 +180,7 @@ g) **Order matters**. Simulate changing 101:9, 202:9, 302:1, and finally 101:15 
 
     $ openstack congress policy simulate classification 'error(x)'
         'p+(101, 9) p-(101, 0) p+(202, 9) p-(202, "abc") p+(302, 1) p-(302, 9)
-         p+(101, 15) p-(101, 9)' null --delta
+         p+(101, 15) p-(101, 9)' action --delta
     error+(202)
     error-(302)
 
@@ -188,7 +188,7 @@ g) **Order matters**. Simulate changing 101:9, 202:9, 302:1, and finally 101:15 
 h) **Tracing**. Simulate changing 101:9 and query the *change* in the error table, while asking for a debug trace of the computation::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'p+(101, 9) p-(101, 0)' null --delta --trace
+        'p+(101, 9) p-(101, 0)' action --delta --trace
     error+(101)
     RT    : ** Simulate: Querying error(x)
     Clas  : Call: error(x)
@@ -208,8 +208,8 @@ h) **Tracing**. Simulate changing 101:9 and query the *change* in the error tabl
 i) **Changing rules**.  Simulate adding 101: 5 (which results in 101 having 2 values) and deleting the rule that says each key must have at most 1 value. Then query the error table::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'p+(101, 5)   error-(x) :- p(x, val1), p(x, val2), not eq(val1, val2)'
-        null
+        'p+(101, 5)   error-(x) :- p(x, val1), p(x, val2), not equal(val1, val2)'
+        action
     error(302)
 
 The syntax for inserting/deleting rules is a bit awkward since we just afix
@@ -222,7 +222,7 @@ description rules.
 
 
 2.1 Simulation with Actions
-------------------------------------------
+---------------------------
 
 The downside to the simulation functionality just described is that the
 cloud service wanting to prevent policy violations would need to compute the
@@ -238,7 +238,7 @@ several different cloud services.  Translating each API call exposed by a
 cloud service into the collection of Congress table changes is sometimes
 impractical.
 
-In the key/value examples above, it the caller needed to know the current
+In the key/value examples above, the caller needed to know the current
 state of the key/value store in order to accurately describe the changes
 she wanted to make.  Setting the key 101 to value 9 meant knowing that its
 current value was 0 so that during the simulation we could say to delete the
@@ -283,14 +283,14 @@ shown previously.
 
 a) **Inserts and Deletes**. Set key 101 to value 5 and ask for the contents of error::
 
-    $ openstack congress policy simulate classification 'error(x)' 'set(101, 5)' null
+    $ openstack congress policy simulate classification 'error(x)' 'set(101, 5)' action
     error(302)
 
 
 b) **Multiple error changes**. Simulate changing 101:9, 202:9, 302:1 and query the *change* in the error table::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'set(101, 9) set(202, 9) set(302, 9)' null --delta
+        'set(101, 9) set(202, 9) set(302, 1)' action --delta
     error+(202)
     error+(101)
     error-(302)
@@ -299,20 +299,20 @@ b) **Multiple error changes**. Simulate changing 101:9, 202:9, 302:1 and query t
 c) **Order matters**. Simulate changing 101:9, 202:9, 302:1, and finally 101:15 (in that order).  Then query the *change* in the error table::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'set(101, 9) set(202, 9) set(302, 1) set(101, 15)' null --delta
+        'set(101, 9) set(202, 9) set(302, 1) set(101, 15)' action --delta
     error+(202)
     error-(302)
 
 d) **Mixing actions and state-changes**.  Simulate changing 101:9 and adding value 7 for key 202.  Then query the *change* in the error table::
 
     $ openstack congress policy simulate classification 'error(x)'
-        'set(101, 9) p+(202, 7)' null --delta
+        'set(101, 9) p+(202, 7)' action --delta
     error+(202)
     error+(101)
 
 
 3. Manual Reactive Enforcement
-=================================
+==============================
 Not all policies can be enforced proactively on all clouds, which means that sometimes
 the cloud will violate policy.  Once policy violations happen, Congress can take action
 to transition the cloud back into one of the states permitted by policy.  We call this

@@ -18,10 +18,10 @@
 
 import sys
 
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log as logging
 
-from congress.openstack.common import log as logging
-from congress.utils import Location
+from congress import utils
 
 
 LOG = logging.getLogger(__name__)
@@ -45,14 +45,27 @@ class CongressException(Exception):
 
     """
     msg_fmt = _("An unknown exception occurred.")
-    # FIXME(arosen) the http_code should not live in the base exception class!
+    # FIXME(thinrichs): this exception is overly complex and should
+    #  not include HTTP codes at all.  Proper fix needs to touch
+    #  too many files that others are currently working on.
     code = 500
     headers = {}
     safe = False
 
     def __init__(self, message=None, **kwargs):
-        self.kwargs = kwargs
+        """FIXME(thinrichs):
 
+        We just want name and data as fields.
+        :param name will be a name from error_codes, which includes the basic
+        message.
+        :param data will contain specifics for this instance of the
+        exception, e.g. a description error message.
+        """
+        self.data = kwargs.pop('data', None)
+        self.name = kwargs.pop('name', None)
+
+        # TODO(thinrichs): remove the rest of this (except the call to super)
+        self.kwargs = kwargs
         if 'code' not in self.kwargs:
             try:
                 self.kwargs['code'] = self.code
@@ -68,7 +81,7 @@ class CongressException(Exception):
                 # kwargs doesn't match a variable in the message
                 # log the issue and the kwargs
                 LOG.exception(_('Exception in string format operation'))
-                for name, value in kwargs.iteritems():
+                for name, value in kwargs.items():
                     LOG.error("%s: %s", name, value)    # noqa
 
                 if CONF.fatal_exception_format_errors:
@@ -83,6 +96,10 @@ class CongressException(Exception):
         # NOTE(mrodden): use the first argument to the python Exception object
         # which should be our full CongressException message, (see __init__)
         return self.args[0]
+
+# FIXME(thinrichs): Get rid of the ones below and instead create exception
+#   classes to represent the parts of the code that generated the exception,
+#   e.g. datasources versus policy compiler versus policy runtime.
 
 
 class Forbidden(CongressException):
@@ -109,7 +126,6 @@ class PolicyNotAuthorized(Forbidden):
     msg_fmt = _("Policy doesn't allow %(action)s to be performed.")
 
 
-# FIXME(arosen) This should probably inherit from CongresException
 class InvalidParamException(Exception):
     pass
 
@@ -130,11 +146,14 @@ class DanglingReference(Conflict):
     pass
 
 
+# NOTE(thinrichs): The following represent different kinds of
+#   exceptions: the policy compiler and the policy runtime, respectively.
 class PolicyException(CongressException):
-    def __init__(self, msg, obj=None, line=None, col=None):
-        CongressException.__init__(self, msg)
+    def __init__(self, msg=None, obj=None, line=None, col=None,
+                 name=None, data=None):
+        CongressException.__init__(self, message=msg, name=name, data=data)
         self.obj = obj
-        self.location = Location(line=line, col=col, obj=obj)
+        self.location = utils.Location(line=line, col=col, obj=obj)
 
     def __str__(self):
         s = str(self.location)

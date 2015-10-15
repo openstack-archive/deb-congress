@@ -12,14 +12,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.config import cfg
-from oslo.middleware import request_id
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_middleware import request_id
 import webob.dec
 import webob.exc
 
 from congress.common import wsgi
 from congress import context
-from congress.openstack.common import log as logging
+
 
 LOG = logging.getLogger(__name__)
 

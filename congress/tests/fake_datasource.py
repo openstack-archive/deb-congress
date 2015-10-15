@@ -13,10 +13,10 @@
 #    under the License.
 #
 
+from oslo_log import log as logging
 
 from congress.datasources import datasource_driver
 from congress.datasources import datasource_utils
-from congress.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -26,7 +26,8 @@ def d6service(name, keys, inbox, datapath, args):
     return FakeDataSource(name, keys, inbox, datapath, args)
 
 
-class FakeDataSource(datasource_driver.DataSourceDriver):
+class FakeDataSource(datasource_driver.DataSourceDriver,
+                     datasource_driver.ExecutionDriver):
 
     value_trans = {'translation-type': 'VALUE'}
     fake_translator = {
@@ -42,7 +43,12 @@ class FakeDataSource(datasource_driver.DataSourceDriver):
     def __init__(self, name='', keys='', inbox=None, datapath=None, args=None):
         super(FakeDataSource, self).__init__(name, keys, inbox,
                                              datapath, args)
-        self.initialized = True
+        datasource_driver.ExecutionDriver.__init__(self)
+        self.add_executable_method('fake_act',
+                                   [{'name': 'server_id',
+                                    'description': 'server to act'}],
+                                   'fake action')
+        self._init_end_start_poll()
 
     @staticmethod
     def get_datasource_info():

@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 from oslo_log import log as logging
+from tempest_lib import decorators
 
 from tempest import clients  # noqa
 from tempest import config  # noqa
@@ -39,11 +40,12 @@ class TestKeystoneV2Driver(manager_congress.ScenarioPolicyBase):
 
     def setUp(cls):
         super(TestKeystoneV2Driver, cls).setUp()
-        cls.os = clients.Manager(cls.admin_credentials())
+        cls.os = clients.Manager(cls.admin_manager.auth_provider.credentials)
         cls.keystone = cls.os.identity_client
         cls.datasource_id = manager_congress.get_datasource_id(
             cls.admin_manager.congress_client, 'keystone')
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     def test_keystone_users_table(self):
         user_schema = (
@@ -69,10 +71,12 @@ class TestKeystoneV2Driver(manager_congress.ScenarioPolicyBase):
                 except KeyError:
                     return False
                 for index in range(len(user_schema)):
-                    if (user_schema[index]['name'] == 'tenantId' and
-                            'tenantId' not in user_row):
-                        # Keystone does not return the tenantId column if not
-                        # present.
+                    if ((user_schema[index]['name'] == 'tenantId' and
+                            'tenantId' not in user_row) or
+                        (user_schema[index]['name'] == 'email' and
+                            'email' not in user_row)):
+                        # Keystone does not return the tenantId or email column
+                        # if not present.
                         pass
                     elif (str(row['data'][index]) !=
                             str(user_row[user_schema[index]['name']])):
@@ -80,10 +84,11 @@ class TestKeystoneV2Driver(manager_congress.ScenarioPolicyBase):
             return True
 
         if not test.call_until_true(func=_check_data_table_keystone_users,
-                                    duration=20, sleep_for=4):
+                                    duration=100, sleep_for=4):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     def test_keystone_roles_table(self):
         role_schema = (
@@ -115,10 +120,11 @@ class TestKeystoneV2Driver(manager_congress.ScenarioPolicyBase):
             return True
 
         if not test.call_until_true(func=_check_data_table_keystone_roles,
-                                    duration=20, sleep_for=4):
+                                    duration=100, sleep_for=4):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     def test_keystone_tenants_table(self):
         tenant_schema = (
@@ -150,6 +156,6 @@ class TestKeystoneV2Driver(manager_congress.ScenarioPolicyBase):
             return True
 
         if not test.call_until_true(func=_check_data_table_keystone_tenants,
-                                    duration=20, sleep_for=4):
+                                    duration=100, sleep_for=5):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")

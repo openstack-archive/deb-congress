@@ -12,17 +12,23 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from congressclient.v1 import client as congress_client
-import keystoneclient
-from oslo_log import log as logging
-from tempest import config
-from tempest import exceptions
-from tempest.scenario import manager_congress
-from tempest import test
 
 import os
+import socket
 import subprocess
 import tempfile
+
+from oslo_log import log as logging
+from tempest_lib import decorators
+
+from tempest import config
+from tempest import exceptions
+from tempest import manager as tempestmanager
+from tempest_lib import exceptions as restexc
+from tempest.common import cred_provider
+from tempest.scenario import manager_congress
+from tempest.services.policy import policy_client
+from tempest import test
 
 CONF = config.CONF
 LOG = logging.getLogger(__name__)
@@ -30,13 +36,34 @@ LOG = logging.getLogger(__name__)
 
 class TestHA(manager_congress.ScenarioPolicyBase):
 
+    REPLICA_TYPE='policyha'
+
     def setUp(self):
         super(TestHA, self).setUp()
         self.keypairs = {}
         self.servers = []
         self.replicas = {}
 
+    def _prepare_replica(self, port_num):
+        replica_url = "http://127.0.0.1:%d" % port_num
+        ksclient = self.admin_manager.identity_client
+        resp = ksclient.create_service('congressha', self.REPLICA_TYPE,
+                                       description='policy ha service')
+        self.replica_service_id = resp['id']
+        resp = ksclient.create_endpoint(self.replica_service_id,
+                                        CONF.identity.region,
+                                        publicurl=replica_url,
+                                        adminurl=replica_url,
+                                        internalurl=replica_url)
+        self.replica_endpoint_id = resp['id']
+
+    def _cleanup_replica(self):
+        ksclient = self.admin_manager.identity_client
+        ksclient.delete_endpoint(self.replica_endpoint_id)
+        ksclient.delete_service(self.replica_service_id)
+
     def start_replica(self, port_num):
+        self._prepare_replica(port_num)
         f = tempfile.NamedTemporaryFile(mode='w', suffix='.conf',
                                         prefix='congress%d-' % port_num,
                                         dir='/tmp', delete=False)
@@ -69,38 +96,37 @@ class TestHA(manager_congress.ScenarioPolicyBase):
 
     def stop_replica(self, port_num):
         proc, conf_file = self.replicas[port_num]
-        proc.terminate()
+        # Using proc.terminate() will block at proc.wait(), no idea why yet
+        proc.kill()
         proc.wait()
         os.unlink(conf_file)
         self.replicas[port_num] = (None, conf_file)
+        self._cleanup_replica()
 
-    def create_client(self, port_num):
-        creds = self.admin_credentials()
-        auth = keystoneclient.auth.identity.v2.Password(
-            auth_url=CONF.identity.uri,
-            username=creds.username,
-            password=creds.password,
-            tenant_name=creds.tenant_name)
-        session = keystoneclient.session.Session(auth=auth)
-        return congress_client.Client(
-            session=session,
-            auth=None,
-            endpoint_override='http://127.0.0.1:%d' % port_num,
-            region_name=CONF.identity.region)
+    def create_client(self, client_type):
+        creds = cred_provider.get_configured_credentials('identity_admin')
+        auth_prov = tempestmanager.get_auth_provider(creds)
+
+        return policy_client.PolicyClient(
+            auth_prov, client_type,
+            CONF.identity.region)
 
     def datasource_exists(self, client, datasource_id):
         try:
             LOG.debug("datasource_exists begin")
             body = client.list_datasource_status(datasource_id)
             LOG.debug("list_datasource_status: %s", str(body))
+        except restexc.NotFound as e:
+            LOG.debug("not found")
+            return False
+        except restexc.Unauthorized as e:
+            LOG.debug("connection refused")
+            return False
+        except socket.error as e:
+            LOG.debug("Replica server not ready")
+            return False
         except Exception as e:
-            if hasattr(e, 'http_status') and e.http_status == 404:
-                LOG.debug("not found")
-                return False
-            elif isinstance(e, keystoneclient.exceptions.ConnectionRefused):
-                LOG.debug("connection refused")
-                return False
-            raise
+            raise e
         return True
 
     def datasource_missing(self, client, datasource_id):
@@ -108,14 +134,17 @@ class TestHA(manager_congress.ScenarioPolicyBase):
             LOG.debug("datasource_missing begin")
             body = client.list_datasource_status(datasource_id)
             LOG.debug("list_datasource_status: %s", str(body))
+        except restexc.NotFound as e:
+            LOG.debug("not found")
+            return True
+        except restexc.Unauthorized as e:
+            LOG.debug("connection refused")
+            return False
+        except socket.error as e:
+            LOG.debug("Replica server not ready")
+            return False
         except Exception as e:
-            if hasattr(e, 'http_status') and e.http_status == 404:
-                LOG.debug("not found")
-                return True
-            elif isinstance(e, keystoneclient.exceptions.ConnectionRefused):
-                LOG.debug("connection refused")
-                return False
-            raise
+            raise e
         return False
 
     def find_fake(self, client):
@@ -136,15 +165,18 @@ class TestHA(manager_congress.ScenarioPolicyBase):
         item = {'id': None,
                 'name': 'fake',
                 'driver': 'fake_datasource',
-                'config': '{}',
+                'config': '{"username":"fakeu", \
+                            "tenant_name": "faket", \
+                            "password": "fakep", \
+                            "auth_url": "http://127.0.0.1:5000/v2"}',
                 'description': 'bar',
                 'enabled': True}
         ret = client.create_datasource(item)
         LOG.debug('created fake driver: %s', str(ret['id']))
         return ret['id']
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
-    @test.services('compute',)
     def test_datasource_db_sync_add(self):
         # Verify that a replica adds a datasource when a datasource
         # appears in the database.
@@ -180,7 +212,7 @@ class TestHA(manager_congress.ScenarioPolicyBase):
             self.start_replica(CLIENT2_PORT)
 
             # Create session for second server.
-            client2 = self.create_client(CLIENT2_PORT)
+            client2 = self.create_client(self.REPLICA_TYPE)
 
             # Verify that second server has fake datasource
             if not test.call_until_true(
@@ -215,8 +247,8 @@ class TestHA(manager_congress.ScenarioPolicyBase):
             if need_to_delete_fake:
                 self.admin_manager.congress_client.delete_datasource(fake_id)
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
-    @test.services('compute',)
     def test_datasource_db_sync_remove(self):
         # Verify that a replica removes a datasource when a datasource
         # disappears from the database.
@@ -235,7 +267,7 @@ class TestHA(manager_congress.ScenarioPolicyBase):
                     "primary should have fake, but does not")
 
             # Create session for second server.
-            client2 = self.create_client(CLIENT2_PORT)
+            client2 = self.create_client(self.REPLICA_TYPE)
 
             # Verify that second server has fake datasource
             if not test.call_until_true(

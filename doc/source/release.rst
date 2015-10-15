@@ -2,13 +2,39 @@
 
 .. _release:
 
-================
+=============
 Release Notes
-================
+=============
 
+Liberty
+-------
+**Main updates**
+
+* Added datasource driver for Heat
+* Designed and began implementation of new distributed architecture
+* Added API call to list available actions for manual reactive enforcement
+* Refactored all datasource drivers for improved consistency
+* Extended grammar to include insert and delete events
+* Improved tempest/devstack support for running in gate
+* Added version API
+* Improved support for python3
+* Reduced debug log volume by reducing messages sent on message bus
+* Enabled action execution for all datasources
+* Eliminated busy-loop in message bus for reduced cpu consumption
+* Improved unit test coverage for API
+* Added experimental vm-migration policy enforcement engine
+
+**Known issues**
+* ``DELETE /v1/policies/<policy-name>`` returns 404 even if the policy exists.
+  The workaround is to use ``DELETE /v1/policies/<policy-id>``.
+* Checking out devstack to the stable/liberty release before running stack.sh
+  does not properly checkout the stable/liberty branch of Congress.  The workaround
+  is to either set CONGRESS_BRANCH='stable/liberty' in localrc or checkout the
+  stable/liberty branch of the Congress repo and restart it:
+  ``cd /opt/stack/congress; git checkout -b origin/stable/liberty``
 
 Kilo
---------
+----
 
 **Main features**
 

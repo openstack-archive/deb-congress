@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from oslo.config import cfg
+from oslo_config import cfg
 
-from congress.exception import DanglingReference
+from congress import exception
 from congress import harness
 from congress.managers import datasource as datasource_manager
 from congress.tests import base
@@ -80,7 +80,7 @@ class TestDataSourceManager(base.SqlTestCase):
         # let driver generate this for us.
         del req['id']
         result = self.datasource_mgr.add_datasource(req)
-        for key, value in req.iteritems():
+        for key, value in req.items():
             self.assertEqual(value, result[key])
         # TODO(thinrichs): test that ensure the DB, the policy engine,
         #   and the datasource manager are all in sync
@@ -96,7 +96,7 @@ class TestDataSourceManager(base.SqlTestCase):
         del req['id']
         result = self.datasource_mgr.add_datasource(req)
         result = self.datasource_mgr.get_datasource(result['id'])
-        for key, value in req.iteritems():
+        for key, value in req.items():
             self.assertEqual(value, result[key])
 
     def test_get_datasources(self):
@@ -115,11 +115,11 @@ class TestDataSourceManager(base.SqlTestCase):
         result = self.datasource_mgr.get_datasources()
 
         req['name'] = 'datasource1'
-        for key, value in req.iteritems():
+        for key, value in req.items():
             self.assertEqual(value, result[0][key])
 
         req['name'] = 'datasource2'
-        for key, value in req.iteritems():
+        for key, value in req.items():
             self.assertEqual(value, result[1][key])
 
     def test_get_datasources_hide_secret(self):
@@ -141,11 +141,11 @@ class TestDataSourceManager(base.SqlTestCase):
         result = self.datasource_mgr.get_datasources(filter_secret=True)
 
         req['name'] = 'datasource1'
-        for key, value in req.iteritems():
+        for key, value in req.items():
             self.assertEqual(value, result[0][key])
 
         req['name'] = 'datasource2'
-        for key, value in req.iteritems():
+        for key, value in req.items():
             self.assertEqual(value, result[1][key])
 
     def test_create_datasource_duplicate_name(self):
@@ -194,7 +194,7 @@ class TestDataSourceManager(base.SqlTestCase):
         engine = self.cage.service_object('engine')
         engine.create_policy('alice')
         engine.insert('p(x) :- %s:q(x)' % req['name'], 'alice')
-        self.assertRaises(DanglingReference,
+        self.assertRaises(exception.DanglingReference,
                           self.datasource_mgr.delete_datasource,
                           result['id'])
 
@@ -234,3 +234,21 @@ class TestDataSourceManager(base.SqlTestCase):
         self.datasource_mgr = datasource_manager.DataSourceManager
         self.assertRaises(datasource_manager.BadConfig,
                           self.datasource_mgr.validate_configured_drivers)
+
+    def test_datasource_spawn_datasource_poll(self):
+        req = self._get_datasource_request()
+        req['driver'] = 'fake_datasource'
+        req['config'] = {'auth_url': 'foo',
+                         'username': 'armax',
+                         'password': 'password',
+                         'tenant_name': 'armax'}
+        # let driver generate this for us.
+        del req['id']
+        result = self.datasource_mgr.add_datasource(req)
+        self.datasource_mgr.request_refresh(result['id'])
+        # TODO(thinrichs): test that the driver actually polls
+
+    def test_datasource_spawn_datasource_poll_not_found(self):
+        self.assertRaises(datasource_manager.DatasourceNotFound,
+                          self.datasource_mgr.request_refresh,
+                          "does_not_exist")

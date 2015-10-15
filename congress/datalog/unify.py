@@ -16,8 +16,7 @@
 import uuid
 
 import compile
-
-from congress.openstack.common import log as logging
+from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -78,7 +77,7 @@ class BiUnifier(object):
         # each value is a Value
         self.contents = {}
         if dictionary is not None:
-            for var, value in dictionary.iteritems():
+            for var, value in dictionary.items():
                 self.add(var, value, None)
 
     def add(self, var, value, unifier):
@@ -145,7 +144,7 @@ class BiUnifier(object):
         s = repr(self)
         s += "={"
         s += ",".join(["{}:{}".format(str(var), str(val))
-                       for var, val in self.contents.iteritems()])
+                       for var, val in self.contents.items()])
         s += "}"
         return s
 
@@ -153,7 +152,7 @@ class BiUnifier(object):
         s = repr(self)
         s += "={"
         s += ",".join(["{}:{}".format(var, val.recur_str())
-                       for var, val in self.contents.iteritems()])
+                       for var, val in self.contents.items()])
         s += "}"
         return s
 
@@ -165,7 +164,7 @@ def binding_str(binding):
     """Handles string conversion of either dictionary or Unifier."""
     if isinstance(binding, dict):
         s = ",".join(["{}: {}".format(str(var), str(val))
-                     for var, val in binding.iteritems()])
+                     for var, val in binding.items()])
         return '{' + s + '}'
     else:
         return str(binding)
@@ -187,11 +186,7 @@ def same_schema(atom1, atom2, theoryname=None):
 
     THEORYNAME is the default theory name.
     """
-    if atom1.table != atom2.table or atom1.modal != atom2.modal:
-        return False
-    atom1theory = atom1.theory or theoryname
-    atom2theory = atom2.theory or theoryname
-    if atom1theory != atom2theory:
+    if not atom1.table.same(atom2.table, theoryname):
         return False
     if len(atom1.arguments) != len(atom2.arguments):
         return False
@@ -274,25 +269,53 @@ def bi_unify_lists(iter1, unifier1, iter2, unifier2):
 #     return tuple(result)
 
 
-def match_tuple_atom(tuple, atom):
+def match_tuple_atom(tupl, atom):
     """Get bindings.
 
     Returns a binding dictionary that when applied to ATOM's arguments
     gives exactly TUPLE, or returns None if no such binding exists.
     """
-    if len(tuple) != len(atom.arguments):
+    if len(tupl) != len(atom.arguments):
         return None
     binding = {}
-    for i in xrange(0, len(tuple)):
+    for i in xrange(0, len(tupl)):
         arg = atom.arguments[i]
         if arg.is_variable():
             if arg.name in binding:
                 oldval = binding[arg.name]
-                if oldval != tuple[i]:
+                if oldval != tupl[i]:
                     return None
             else:
                 binding[arg.name] = tuple[i]
     return binding
+
+
+def match_atoms(atom1, unifier, atom2):
+    """Modify UNIFIER so that ATOM1.plug(UNIFIER) == ATOM2.
+
+    ATOM2 is assumed to be ground.
+    UNIFIER is assumed to be a BiUnifier.
+    Return the changes to UNIFIER or None if matching is impossible.
+
+    Matching is a special case of instance-checking since ATOM2
+    in this case must be ground, whereas there is no such limitation
+    for instance-checking.  This makes the code significantly simpler
+    and faster.
+    """
+    if not same_schema(atom1, atom2):
+        return None
+    changes = []
+    for i in xrange(0, len(atom1.arguments)):
+        val, binding = unifier.apply_full(atom1.arguments[i])
+        # LOG.debug("val(%s)=%s at %s; comparing to object %s",
+        #     atom1.arguments[i], val, binding, atom2.arguments[i])
+        if val.is_variable():
+            changes.append(binding.add(val, atom2.arguments[i], None))
+        else:
+            if val.name != atom2.arguments[i].name:
+                undo_all(changes)
+                return None
+    return changes
 
 
 def bi_var_equal(var1, unifier1, var2, unifier2):

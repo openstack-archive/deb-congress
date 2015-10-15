@@ -12,25 +12,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import ACTION_POLICY_TYPE
-from congress.datalog.base import DATABASE_POLICY_TYPE
-from congress.datalog.base import MATERIALIZED_POLICY_TYPE
-from congress.datalog.base import NONRECURSIVE_POLICY_TYPE
-from congress.datalog.base import StringTracer
-from congress.datalog.base import Tracer
+
+from oslo_log import log as logging
+from oslo_utils import uuidutils
+import six
+
+from congress.datalog import base
 from congress.datalog import compile
-from congress.datalog.compile import Event
-from congress.datalog.database import Database
-from congress.datalog.materialized import MaterializedViewTheory
-from congress.datalog.nonrecursive import ActionTheory
-from congress.datalog.nonrecursive import NonrecursiveRuleTheory
+from congress.datalog import database as db
+from congress.datalog import materialized
+from congress.datalog import nonrecursive
 from congress.datalog import unify
-from congress.datalog.utility import iterstr
+from congress.datalog import utility
+from congress.db import db_policy_rules
 from congress.dse import deepsix
-from congress.exception import CongressException
-from congress.exception import DanglingReference
-from congress.exception import PolicyException
-from congress.openstack.common import log as logging
+from congress import exception
 
 LOG = logging.getLogger(__name__)
 
@@ -62,7 +58,7 @@ class ExecutionLogger(object):
 
 
 def list_to_database(atoms):
-    database = Database()
+    database = db.Database()
     for atom in atoms:
         if atom.is_atom():
             database.insert(atom)
@@ -136,7 +132,8 @@ class TriggerRegistry(object):
             self._add_indexes(trigger)
 
     def _add_indexes(self, trigger):
-        full_table = compile.full_tablename(trigger.tablename, trigger.policy)
+        full_table = compile.Tablename.build_service_table(
+            trigger.policy, trigger.tablename)
         deps = self.dependency_graph.dependencies(full_table)
         if deps is None:
             deps = set([full_table])
@@ -147,7 +144,8 @@ class TriggerRegistry(object):
                 self.index[table] = set([trigger])
 
     def _delete_indexes(self, trigger):
-        full_table = compile.full_tablename(trigger.tablename, trigger.policy)
+        full_table = compile.Tablename.build_service_table(
+            trigger.policy, trigger.tablename)
         deps = self.dependency_graph.dependencies(full_table)
         if deps is None:
             deps = set([full_table])
@@ -164,14 +162,12 @@ class TriggerRegistry(object):
             if isinstance(event, compile.Event):
                 if compile.is_rule(event.formula):
                     table_changes |= set(
-                        [compile.global_tablename(
-                         lit.table, lit.theory, event.target)
+                        [lit.table.global_tablename(event.target)
                          for lit in event.formula.heads])
                 else:
-                    table_changes.add(compile.global_tablename(
-                        event.formula.table, event.formula.theory,
-                        event.target))
-            elif isinstance(event, basestring):
+                    table_changes.add(
+                        event.formula.table.global_tablename(event.target))
+            elif isinstance(event, six.string_types):
                 table_changes.add(event)
         triggers = set()
         for table in table_changes:
@@ -183,7 +179,7 @@ class TriggerRegistry(object):
         """Build string representation of self.index; useful for debugging."""
         s = '{'
         s += ";".join(["%s -> %s" % (key, ",".join(str(x) for x in value))
-                       for key, value in self.index.iteritems()])
+                       for key, value in self.index.items()])
         s += '}'
         return s
 
@@ -209,7 +205,7 @@ class Runtime (object):
 
     def __init__(self):
         # tracer object
-        self.tracer = Tracer()
+        self.tracer = base.Tracer()
         # record execution
         self.logger = ExecutionLogger()
         # collection of theories
@@ -224,54 +220,244 @@ class Runtime (object):
         # execution triggers
         self.execution_triggers = {}
 
-    def create_policy(self, name, abbr=None, kind=None):
+    ###############################################
+    # Persistence layer
+    ###############################################
+
+    def persistent_create_policy(self, name, id_=None, abbr=None, kind=None,
+                                 desc=None):
+        # validation for name
+        try:
+            self.parse("%s() :- true()" % name)
+        except exception.PolicyException:
+            raise exception.PolicyException(
+                "Policy name %s is not a valid tablename" % name)
+
+        # create policy in policy engine
+        if id_ is None:
+            id_ = str(uuidutils.generate_uuid())
+        policy_obj = self.create_policy(
+            name=name, abbr=abbr, kind=kind, id_=id_)
+
+        # save policy to database
+        if desc is None:
+            desc = ''
+        obj = {'id': policy_obj.id,
+               'name': policy_obj.name,
+               'owner_id': 'user',
+               'description': desc,
+               'abbreviation': policy_obj.abbr,
+               'kind': policy_obj.kind}
+        try:
+            db_policy_rules.add_policy(obj['id'],
+                                       obj['name'],
+                                       obj['abbreviation'],
+                                       obj['description'],
+                                       obj['owner_id'],
+                                       obj['kind'])
+        except Exception:
+            policy_name = policy_obj.name
+            self.delete_policy(policy_name)
+            msg = "Error thrown while adding policy %s into DB." % policy_name
+            LOG.exception(msg)
+            raise exception.PolicyException(msg)
+        return obj
+
+    def persistent_delete_policy(self, id_):
+        # check that policy exists
+        db_object = db_policy_rules.get_policy(id_)
+        if db_object is None:
+            raise KeyError("Cannot delete policy with ID '%s': "
+                           "ID '%s' does not exist",
+                           id_, id_)
+        if db_object['name'] in ['classification', 'action']:
+            raise KeyError("Cannot delete system-maintained policy %s",
+                           db_object['name'])
+        # delete policy from memory and from database
+        self.delete_policy(id_)
+        db_policy_rules.delete_policy(id_)
+        return db_object.to_dict()
+
+    def persistent_get_policies(self):
+        return [p.to_dict()
+                for p in db_policy_rules.get_policies()]
+
+    def persistent_get_policy(self, id_):
+        policy = db_policy_rules.get_policy(id_)
+        if not policy:
+            return
+        return policy.to_dict()
+
+    def persistent_get_rule(self, id_, policy_name):
+        """Return data for rule with id_ in policy_name."""
+        rule = db_policy_rules.get_policy_rule(id_, policy_name)
+        if rule is None:
+            return
+        return rule.to_dict()
+
+    def persistent_get_rules(self, policy_name):
+        """Return data for all rules in policy_name."""
+        rules = db_policy_rules.get_policy_rules(policy_name)
+        return [rule.to_dict() for rule in rules]
+
+    def persistent_insert_rule(self, policy_name, str_rule, rule_name):
+        """Insert and persists rule into policy_name."""
+        # Reject rules inserted into non-persisted policies
+        # (i.e. datasource policies)
+        policies = db_policy_rules.get_policies()
+        persisted_policies = set([p.name for p in policies])
+        if policy_name not in persisted_policies:
+            if policy_name in self.theory:
+                LOG.debug(
+                    "insert_persisted_rule error: rule not permitted for "
+                    "policy %s", policy_name)
+                raise exception.PolicyRuntimeException(
+                    name='rule_not_permitted')
+
+        id_ = uuidutils.generate_uuid()
+        try:
+            rule = self.parse(str_rule)
+        except exception.PolicyException as e:
+            # TODO(thinrichs): change compiler to provide these error_code
+            #   names directly.
+            raise exception.PolicyException(str(e), name='rule_syntax')
+
+        if len(rule) == 1:
+            rule = rule[0]
+        else:
+            msg = ("Received multiple rules: " +
+                   "; ".join(str(x) for x in rule))
+            raise exception.PolicyRuntimeException(msg, name='multiple_rules')
+
+        rule.set_id(id_)
+        rule.set_name(rule_name)
+        rule.set_comment(None)
+        rule.set_original_str(str_rule)
+        changes = self._safe_process_policy_update(rule, policy_name)
+
+        # check if change accepted by policy engine
+        for change in changes:
+            if change.formula != rule:
+                continue
+            d = {'rule': rule.pretty_str(),
+                 'id': str(rule.id),
+                 'comment': rule.comment,
+                 'name': rule.name}
+            try:
+                db_policy_rules.add_policy_rule(
+                    d['id'], policy_name, str_rule, d['comment'],
+                    rule_name=d['name'])
+                return (d['id'], d)
+            except Exception as db_exception:
+                try:
+                    self._safe_process_policy_update(
+                        rule, policy_name, insert=False)
+                except Exception as change_exception:
+                    raise exception.PolicyException(
+                        "Error thrown during recovery from DB error. "
+                        "Inconsistent state.  DB error: %s.  "
+                        "New error: %s." % (str(db_exception),
+                                            str(change_exception)))
+
+        # change not accepted means it was already there
+        raise exception.PolicyRuntimeException(
+            name='rule_already_exists')
+
+    def persistent_delete_rule(self, id_, policy_name):
+        item = self.persistent_get_rule(id_, policy_name)
+        if item is None:
+            raise exception.PolicyRuntimeException(
+                name='rule_not_exists',
+                data='ID: %s, policy_name: %s' % (id_, policy_name))
+        rule = self.parse1(item['rule'])
+        self._safe_process_policy_update(rule, policy_name, insert=False)
+        db_policy_rules.delete_policy_rule(id_)
+        return item
+
+    def persistent_load_policies(self):
+        """Load policies from database."""
+        for policy in db_policy_rules.get_policies():
+            self.create_policy(policy.name, abbr=policy.abbreviation,
+                               kind=policy.kind, id_=policy.id)
+
+    def persistent_load_rules(self):
+        """Load all rules from the database."""
+        rules = db_policy_rules.get_policy_rules()
+        for rule in rules:
+            parsed_rule = self.parse1(rule.rule)
+            self._safe_process_policy_update(
+                parsed_rule,
+                rule.policy_name)
+
+    def _safe_process_policy_update(self, parsed_rule, policy_name,
+                                    insert=True):
+        if policy_name not in self.theory:
+            raise exception.PolicyRuntimeException(
+                'Policy ID %s does not exist' % policy_name,
+                name='policy_not_exist')
+        event = compile.Event(
+            formula=parsed_rule,
+            insert=insert,
+            target=policy_name)
+        (permitted, changes) = self.process_policy_update([event])
+        if not permitted:
+            raise exception.PolicyException(
+                ";".join([str(x) for x in changes]),
+                name='rule_syntax')
+        return changes
+
+    ##########################
+    # Non-persistence layer
+    ##########################
+
+    def create_policy(self, name, abbr=None, kind=None, id_=None):
         """Create a new policy and add it to the runtime.
 
         ABBR is a shortened version of NAME that appears in
         traces.  KIND is the name of the datastructure used to
         represent a policy.
         """
-        if not isinstance(name, basestring):
+        if not isinstance(name, six.string_types):
             raise KeyError("Policy name %s must be a string" % name)
         if name in self.theory:
             raise KeyError("Policy with name %s already exists" % name)
-        if not isinstance(abbr, basestring):
+        if not isinstance(abbr, six.string_types):
             abbr = name[0:5]
         LOG.debug("Creating policy <%s> with abbr <%s> and kind <%s>",
                   name, abbr, kind)
         if kind is None:
-            kind = NONRECURSIVE_POLICY_TYPE
+            kind = base.NONRECURSIVE_POLICY_TYPE
         else:
             kind = kind.lower()
-        if kind == NONRECURSIVE_POLICY_TYPE:
-            PolicyClass = NonrecursiveRuleTheory
-        elif kind == ACTION_POLICY_TYPE:
-            PolicyClass = ActionTheory
-        elif kind == DATABASE_POLICY_TYPE:
-            PolicyClass = Database
-        elif kind == MATERIALIZED_POLICY_TYPE:
-            PolicyClass = MaterializedViewTheory
+        if kind == base.NONRECURSIVE_POLICY_TYPE:
+            PolicyClass = nonrecursive.NonrecursiveRuleTheory
+        elif kind == base.ACTION_POLICY_TYPE:
+            PolicyClass = nonrecursive.ActionTheory
+        elif kind == base.DATABASE_POLICY_TYPE:
+            PolicyClass = db.Database
+        elif kind == base.MATERIALIZED_POLICY_TYPE:
+            PolicyClass = materialized.MaterializedViewTheory
         else:
-            raise PolicyException(
+            raise exception.PolicyException(
                 "Unknown kind of policy: %s" % kind)
         policy_obj = PolicyClass(name=name, abbr=abbr, theories=self.theory)
+        policy_obj.set_id(id_)
         policy_obj.set_tracer(self.tracer)
         self.theory[name] = policy_obj
         LOG.debug("Created policy <%s> with abbr <%s> and kind <%s>",
                   policy_obj.name, policy_obj.abbr, policy_obj.kind)
         return policy_obj
 
-    def delete_policy(self, name, disallow_dangling_refs=False):
+    def delete_policy(self, name_or_id, disallow_dangling_refs=False):
         """Deletes policy with name NAME or throws KeyError or DanglingRefs."""
-        LOG.debug("Deleting policy named %s", name)
-        if name not in self.theory:
-            raise KeyError("Policy with name %s does not exist" % name)
+        LOG.info("Deleting policy named %s", name_or_id)
+        name = self._find_policy_name(name_or_id)
         if disallow_dangling_refs:
             refs = self._references_to_policy(name)
             if refs:
                 refmsg = ";".join("%s: %s" % (policy, rule)
                                   for policy, rule in refs)
-                raise DanglingReference(
+                raise exception.DanglingReference(
                     "Cannot delete %s because it would leave dangling "
                     "references: %s" % (name, refmsg))
         # delete the rules explicitly so cross-theory state is properly
@@ -284,9 +470,9 @@ class Runtime (object):
             msg = ";".join(str(x) for x in errs)
             LOG.exception("%s:: failed to empty theory %s: %s",
                           self.name, name, msg)
-            raise PolicyException("Policy %s could not be deleted since "
-                                  "rules could not all be deleted: %s",
-                                  name, msg)
+            raise exception.PolicyException("Policy %s could not be deleted "
+                                            "since rules could not all be "
+                                            "deleted: %s", name, msg)
         del self.theory[name]
 
     def rename_policy(self, oldname, newname):
@@ -311,79 +497,26 @@ class Runtime (object):
         """Returns list of policy names."""
         return self.theory.keys()
 
-    def policy_object(self, name):
+    def policy_object(self, name=None, id=None):
         """Return policy by given name.  Raises KeyError if does not exist."""
-        try:
-            return self.theory[name]
-        except KeyError:
-            raise KeyError("Policy with name %s does not exist" % name)
+        assert name or id
+        if name:
+            try:
+                if not id or str(self.theory[name].id) == str(id):
+                    return self.theory[name]
+            except KeyError:
+                raise KeyError("Policy with name %s and id %s does not "
+                               "exist" % (name, str(id)))
+        elif id:
+            for n in self.policy_names():
+                if str(self.theory[n].id) == str(id):
+                    return self.theory[n]
+            raise KeyError("Policy with name %s and id %s does not "
+                           "exist" % (name, str(id)))
 
     def policy_type(self, name):
         """Return type of policy NAME.  Throws KeyError if does not exist."""
         return self.policy_object(name).kind
-
-    def get_target(self, name):
-        if name is None:
-            if len(self.theory) == 1:
-                name = next(self.theory.iterkeys())
-            elif len(self.theory) == 0:
-                raise PolicyException("No policies exist.")
-            else:
-                raise PolicyException(
-                    "Must choose a policy to operate on")
-        if name not in self.theory:
-            raise PolicyException("Unknown policy " + str(name))
-        return self.theory[name]
-
-    def get_target_name(self, name):
-        """Resolve NAME to the name of a proper policy (even if it is None).
-
-        Raises PolicyException there is no such policy.
-        """
-        return self.get_target(name).name
-
-    def get_action_names(self, target):
-        """Return a list of the names of action tables."""
-        if target not in self.theory:
-            return []
-        actionth = self.theory[target]
-        actions = actionth.select(self.parse1('action(x)'))
-        return [action.arguments[0].name for action in actions]
-
-    def table_log(self, table, msg, *args):
-        self.tracer.log(table, "RT    : %s" % msg, *args)
-
-    def set_tracer(self, tracer):
-        if isinstance(tracer, Tracer):
-            self.tracer = tracer
-            for th in self.theory:
-                self.theory[th].set_tracer(tracer)
-        else:
-            self.tracer = tracer[0]
-            for th, tracr in tracer[1].items():
-                if th in self.theory:
-                    self.theory[th].set_tracer(tracr)
-
-    def get_tracer(self):
-        """Return (Runtime's tracer, dict of tracers for each theory).
-
-        Useful so we can temporarily change tracing.
-        """
-        d = {}
-        for th in self.theory:
-            d[th] = self.theory[th].get_tracer()
-        return (self.tracer, d)
-
-    def debug_mode(self):
-        tracer = Tracer()
-        tracer.trace('*')
-        self.set_tracer(tracer)
-
-    def production_mode(self):
-        tracer = Tracer()
-        self.set_tracer(tracer)
-
-    # External interface
 
     def set_schema(self, name, schema, complete=False):
         """Set the schema for module NAME to be SCHEMA."""
@@ -394,7 +527,7 @@ class Runtime (object):
 
         Returns the set of all instantiated QUERY that are true.
         """
-        if isinstance(query, basestring):
+        if isinstance(query, six.string_types):
             return self._select_string(query, self.get_target(target), trace)
         elif isinstance(query, tuple):
             return self._select_tuple(query, self.get_target(target), trace)
@@ -407,7 +540,8 @@ class Runtime (object):
         @facts must be an iterable containing compile.Fact objects.
         """
         target_theory = self.get_target(target)
-        alltables = set([compile.build_tablename(target_theory.name, x)
+        alltables = set([compile.Tablename.build_service_table(
+                         target_theory.name, x)
                          for x in tablenames])
         triggers = self.trigger_registry.relevant_triggers(alltables)
         LOG.info("relevant triggers (init): %s",
@@ -420,7 +554,7 @@ class Runtime (object):
         # rerun the trigger queries to check for changes
         table_data_new = self._compute_table_contents(table_triggers)
         # run triggers if tables changed
-        for table, triggers in table_triggers.iteritems():
+        for table, triggers in table_triggers.items():
             if table_data_old[table] != table_data_new[table]:
                 for trigger in triggers:
                     trigger.callback(table,
@@ -429,7 +563,7 @@ class Runtime (object):
 
     def insert(self, formula, target=None):
         """Event handler for arbitrary insertion (rules and facts)."""
-        if isinstance(formula, basestring):
+        if isinstance(formula, six.string_types):
             return self._insert_string(formula, target)
         elif isinstance(formula, tuple):
             return self._insert_tuple(formula, target)
@@ -438,7 +572,7 @@ class Runtime (object):
 
     def delete(self, formula, target=None):
         """Event handler for arbitrary deletion (rules and facts)."""
-        if isinstance(formula, basestring):
+        if isinstance(formula, six.string_types):
             return self._delete_string(formula, target)
         elif isinstance(formula, tuple):
             return self._delete_tuple(formula, target)
@@ -450,7 +584,7 @@ class Runtime (object):
 
         If TARGET is supplied, it overrides the targets in SEQUENCE.
         """
-        if isinstance(sequence, basestring):
+        if isinstance(sequence, six.string_types):
             return self._update_string(sequence, target)
         else:
             return self._update_obj(sequence, target)
@@ -470,8 +604,25 @@ class Runtime (object):
         return " ".join(str(p) for p in target.content())
 
     def simulate(self, query, theory, sequence, action_theory, delta=False,
-                 trace=False):
+                 trace=False, as_list=False):
         """Event handler for simulation.
+
+        :param query is a string/object to query after
+        :param theory is the policy to query
+        :param sequence is a string/iter of updates to state/policy or actions
+        :param action_theory is the policy that contains action descriptions
+        :param delta indicates whether to return *changes* to query caused by
+               sequence
+        :param trace indicates whether to include a string description of the
+               implementation.  When True causes the return value to be the
+               tuple (result, trace).
+        :param as_list controls whether the result is forced to be a list of
+               answers
+        Returns a list of instances of query.  If query/sequence are strings
+        the query instance list is a single string (unless as_list is True
+        in which case the query instance list is a list of strings).  If
+        query/sequence are objects then the query instance list is a list
+        of objects.
 
         The computation of a query given an action sequence. That sequence
         can include updates to atoms, updates to rules, and action
@@ -488,18 +639,20 @@ class Runtime (object):
         assert self.get_target(theory) is not None, "Theory must be known"
         assert self.get_target(action_theory) is not None, (
             "Action theory must be known")
-        if isinstance(query, basestring) and isinstance(sequence, basestring):
+        if (isinstance(query, six.string_types) and
+                isinstance(sequence, six.string_types)):
             return self._simulate_string(query, theory, sequence,
-                                         action_theory, delta, trace)
+                                         action_theory, delta, trace, as_list)
         else:
             return self._simulate_obj(query, theory, sequence, action_theory,
                                       delta, trace)
 
-    def tablenames(self, body_only=False):
+    def tablenames(self, body_only=False, include_builtin=False):
         """Return tablenames occurring in some theory."""
         tables = set()
         for th in self.theory.values():
-            tables |= set(th.tablenames(body_only=body_only))
+            tables |= set(th.tablenames(
+                body_only=body_only, include_builtin=include_builtin))
         return tables
 
     def reserved_tablename(self, name):
@@ -539,27 +692,44 @@ class Runtime (object):
         arity = self.get_target(theory).arity(table, modal)
         if arity is not None:
             return arity
-        policy, tablename = compile.parse_tablename(table)
+        policy, tablename = compile.Tablename.parse_service_table(table)
         if policy not in self.theory:
             return
         return self.theory[policy].arity(tablename, modal)
 
-    # Internal interface
-    # Translate different representations of formulas into
-    #   the compiler's internal representation and then invoke
-    #   appropriate theory's version of the API.
+    def find_subpolicy(self, required_tables, prohibited_tables,
+                       output_tables, target=None):
+        """Return a subset of rules in @theory.
 
+        @required_tables is the set of tablenames that a rule must depend on.
+        @prohibited_tables is the set of tablenames that a rule must
+        NOT depend on.
+        @output_tables is the set of tablenames that all rules must support.
+        """
+        target = self.get_target(target)
+        if target is None:
+            return
+        subpolicy = compile.find_subpolicy(
+            target.content(),
+            required_tables,
+            prohibited_tables,
+            output_tables)
+        return " ".join(str(p) for p in subpolicy)
+
+    ##########################################
+    # Implementation of Non-persistence layer
+    ##########################################
     # Arguments that are strings are suffixed with _string.
     # All other arguments are instances of Theory, Literal, etc.
 
     ###################################
-    # Update policies and data.
+    # Implementation: updates
 
     # insert: convenience wrapper around Update
     def _insert_string(self, policy_string, theory_string):
         policy = self.parse(policy_string)
         return self._update_obj(
-            [Event(formula=x, insert=True, target=theory_string)
+            [compile.Event(formula=x, insert=True, target=theory_string)
              for x in policy],
             theory_string)
 
@@ -568,15 +738,15 @@ class Runtime (object):
                                 theory_string)
 
     def _insert_obj(self, formula, theory_string):
-        return self._update_obj([Event(formula=formula, insert=True,
-                                       target=theory_string)],
+        return self._update_obj([compile.Event(formula=formula, insert=True,
+                                               target=theory_string)],
                                 theory_string)
 
     # delete: convenience wrapper around Update
     def _delete_string(self, policy_string, theory_string):
         policy = self.parse(policy_string)
         return self._update_obj(
-            [Event(formula=x, insert=False, target=theory_string)
+            [compile.Event(formula=x, insert=False, target=theory_string)
              for x in policy],
             theory_string)
 
@@ -585,8 +755,8 @@ class Runtime (object):
                                 theory_string)
 
     def _delete_obj(self, formula, theory_string):
-        return self._update_obj([Event(formula=formula, insert=False,
-                                       target=theory_string)],
+        return self._update_obj([compile.Event(formula=formula, insert=False,
+                                               target=theory_string)],
                                 theory_string)
 
     # update
@@ -606,7 +776,7 @@ class Runtime (object):
         # TODO(thinrichs): look into whether we can move the bulk of the
         # trigger code into Theory, esp. so that MaterializedViewTheory
         # can implement it more efficiently.
-        self.table_log(None, "Updating with %s", iterstr(events))
+        self.table_log(None, "Updating with %s", utility.iterstr(events))
         errors = []
         # resolve event targets and check that they actually exist
         for event in events:
@@ -614,7 +784,7 @@ class Runtime (object):
                 event.target = theory_string
             try:
                 event.target = self.get_target_name(event.target)
-            except PolicyException as e:
+            except exception.PolicyException as e:
                 errors.append(e)
         if len(errors) > 0:
             return (False, errors)
@@ -623,8 +793,8 @@ class Runtime (object):
         if not len(events):
             return (True, [])
         # check that the updates would not cause an error
-        by_theory = self.group_events_by_target(events)
-        for th, th_events in by_theory.iteritems():
+        by_theory = self._group_events_by_target(events)
+        for th, th_events in by_theory.items():
             th_obj = self.get_target(th)
             errors.extend(th_obj.update_would_cause_errors(th_events))
         # update dependency graph (and undo it if errors)
@@ -633,7 +803,7 @@ class Runtime (object):
         if graph_changes:
             if self.global_dependency_graph.has_cycle():
                 # TODO(thinrichs): include path
-                errors.append(PolicyException(
+                errors.append(exception.PolicyException(
                     "Rules are recursive"))
                 self.global_dependency_graph.undo_changes(graph_changes)
         if len(errors) > 0:
@@ -652,12 +822,12 @@ class Runtime (object):
         table_data_old = self._compute_table_contents(table_triggers)
         # actually apply the updates
         changes = []
-        for th, th_events in by_theory.iteritems():
+        for th, th_events in by_theory.items():
             changes.extend(self.get_target(th).update(events))
         # rerun the trigger queries to check for changes
         table_data_new = self._compute_table_contents(table_triggers)
         # run triggers if tables changed
-        for table, triggers in table_triggers.iteritems():
+        for table, triggers in table_triggers.items():
             if table_data_old[table] != table_data_new[table]:
                 for trigger in triggers:
                     trigger.callback(table,
@@ -687,7 +857,7 @@ class Runtime (object):
                 data[(table, policy, modal)] |= ans
         return data
 
-    def group_events_by_target(self, events):
+    def _group_events_by_target(self, events):
         """Return mapping of targets and events.
 
         Return a dictionary mapping event.target to the list of events
@@ -709,7 +879,7 @@ class Runtime (object):
         change each event.target so that the events are routed to the
         proper place.
         """
-        by_target = self.group_events_by_target(events)
+        by_target = self._group_events_by_target(events)
         for target, target_events in by_target.items():
             newth = self._compute_route(target_events, target)
             for event in target_events:
@@ -718,14 +888,14 @@ class Runtime (object):
     def _references_to_policy(self, name):
         refs = []
         name = name + ":"
-        for th_obj in self.theory.itervalues():
+        for th_obj in self.theory.values():
             for rule in th_obj.policy():
                 if any(table.startswith(name) for table in rule.tablenames()):
                     refs.append((name, rule))
         return refs
 
     ##########################
-    # Analyze (internal) state
+    # Implementation: queries
 
     # select
     def _select_string(self, policy_string, theory, trace):
@@ -746,7 +916,7 @@ class Runtime (object):
     def _select_obj(self, query, theory, trace):
         if trace:
             old_tracer = self.get_tracer()
-            tracer = StringTracer()  # still LOG.debugs trace
+            tracer = base.StringTracer()  # still LOG.debugs trace
             tracer.trace('*')     # trace everything
             self.set_tracer(tracer)
             value = set(theory.select(query))
@@ -756,12 +926,26 @@ class Runtime (object):
 
     # simulate
     def _simulate_string(self, query, theory, sequence, action_theory, delta,
-                         trace):
-        query = self.parse1(query)
+                         trace, as_list):
+        query = self.parse(query)
+        if len(query) > 1:
+            raise exception.PolicyException(
+                "Query %s contained more than 1 rule" % query)
+        query = query[0]
         sequence = self.parse(sequence)
         result = self._simulate_obj(query, theory, sequence, action_theory,
                                     delta, trace)
-        return compile.formulas_to_string(result)
+        if trace:
+            actual_result = result[0]
+        else:
+            actual_result = result
+        strresult = [str(x) for x in actual_result]
+        if not as_list:
+            strresult = " ".join(strresult)
+        if trace:
+            return (strresult, result[1])
+        else:
+            return strresult
 
     def _simulate_obj(self, query, theory, sequence, action_theory, delta,
                       trace):
@@ -779,7 +963,7 @@ class Runtime (object):
 
         if trace:
             old_tracer = self.get_tracer()
-            tracer = StringTracer()  # still LOG.debugs trace
+            tracer = base.StringTracer()  # still LOG.debugs trace
             tracer.trace('*')     # trace everything
             self.set_tracer(tracer)
 
@@ -790,18 +974,18 @@ class Runtime (object):
             oldresult = th_object.select(query)
             self.table_log(query.tablename(),
                            "Original result of %s is %s",
-                           query, iterstr(oldresult))
+                           query, utility.iterstr(oldresult))
 
         # apply SEQUENCE
         self.table_log(query.tablename(), "** Simulate: Applying sequence %s",
-                       iterstr(sequence))
+                       utility.iterstr(sequence))
         undo = self.project(sequence, theory, action_theory)
 
         # query the resulting state
         self.table_log(query.tablename(), "** Simulate: Querying %s", query)
         result = set(th_object.select(query))
         self.table_log(query.tablename(), "Result of %s is %s", query,
-                       iterstr(result))
+                       utility.iterstr(result))
         # rollback the changes
         self.table_log(query.tablename(), "** Simulate: Rolling back")
         self.project(undo, theory, action_theory)
@@ -827,7 +1011,7 @@ class Runtime (object):
         # LOG.debug("react to: %s", iterstr(changes))
         actions = self.get_action_names()
         formulas = [change.formula for change in changes
-                    if (isinstance(change, Event)
+                    if (isinstance(change, compile.Event)
                         and change.is_insert()
                         and change.formula.is_atom()
                         and change.tablename() in actions)]
@@ -845,7 +1029,7 @@ class Runtime (object):
         computes that rerouting.  Returns a Theory object.
         """
         self.table_log(None, "Computing route for theory %s and events %s",
-                       theory.name, iterstr(events))
+                       theory.name, utility.iterstr(events))
         # Since Enforcement includes Classify and Classify includes Database,
         #   any operation on data needs to be funneled into Enforcement.
         #   Enforcement pushes it down to the others and then
@@ -880,7 +1064,7 @@ class Runtime (object):
         actth = self.theory[action_theory]
         policyth = self.theory[policy_theory]
         # apply changes to the state
-        newth = NonrecursiveRuleTheory(abbr="Temp")
+        newth = nonrecursive.NonrecursiveRuleTheory(abbr="Temp")
         newth.tracer.trace('*')
         actth.includes.append(newth)
         # TODO(thinrichs): turn 'includes' into an object that guarantees
@@ -889,18 +1073,19 @@ class Runtime (object):
         if actth is not policyth:
             actth.includes.append(policyth)
         actions = self.get_action_names(action_theory)
-        self.table_log(None, "Actions: %s", iterstr(actions))
+        self.table_log(None, "Actions: %s", utility.iterstr(actions))
         undos = []         # a list of updates that will undo SEQUENCE
         self.table_log(None, "Project: %s", sequence)
         last_results = []
         for formula in sequence:
             self.table_log(None, "** Updating with %s", formula)
-            self.table_log(None, "Actions: %s", iterstr(actions))
-            self.table_log(None, "Last_results: %s", iterstr(last_results))
+            self.table_log(None, "Actions: %s", utility.iterstr(actions))
+            self.table_log(None, "Last_results: %s",
+                           utility.iterstr(last_results))
             tablename = formula.tablename()
             if tablename not in actions:
                 if not formula.is_update():
-                    raise PolicyException(
+                    raise exception.PolicyException(
                         "Sequence contained non-action, non-update: " +
                         str(formula))
                 updates = [formula]
@@ -917,7 +1102,7 @@ class Runtime (object):
                     # instantiate action using prior results
                     newth.define(last_results)
                     self.table_log(tablename, "newth (with prior results) %s",
-                                   iterstr(newth.content()))
+                                   utility.iterstr(newth.content()))
                     bindings = actth.top_down_evaluation(
                         formula.variables(), formula.body, find_all=False)
                     if len(bindings) == 0:
@@ -928,7 +1113,7 @@ class Runtime (object):
                     newth.define(grounds)
                 self.table_log(tablename,
                                "newth contents (after action insertion): %s",
-                               iterstr(newth.content()))
+                               utility.iterstr(newth.content()))
                 # self.table_log(tablename, "action contents: %s",
                 #     iterstr(actth.content()))
                 # self.table_log(tablename, "action.includes[1] contents: %s",
@@ -940,7 +1125,7 @@ class Runtime (object):
                 updates = self.resolve_conflicts(updates)
                 updates = unify.skolemize(updates)
                 self.table_log(tablename, "Computed updates: %s",
-                               iterstr(updates))
+                               utility.iterstr(updates))
                 # compute results for next time
                 for update in updates:
                     newth.insert(update)
@@ -973,7 +1158,8 @@ class Runtime (object):
         th_obj = self.theory[theory]
         insert = delta.tablename().endswith('+')
         newdelta = delta.drop_update().drop_theory()
-        changed = th_obj.update([Event(formula=newdelta, insert=insert)])
+        changed = th_obj.update([compile.Event(formula=newdelta,
+                                               insert=insert)])
         if changed:
             return delta.invert_update()
         else:
@@ -985,9 +1171,9 @@ class Runtime (object):
         result = set()
         # split atoms into NEG and RESULT
         for atom in atoms:
-            if atom.table.endswith('+'):
+            if atom.table.table.endswith('+'):
                 result.add(atom)
-            elif atom.table.endswith('-'):
+            elif atom.table.table.endswith('-'):
                 neg.add(atom)
             else:
                 result.add(atom)
@@ -1003,6 +1189,80 @@ class Runtime (object):
     def parse1(self, string):
         return compile.parse1(string, theories=self.theory)
 
+    ##########################
+    # Helper functions
+    ##########################
+
+    def get_target(self, name):
+        if name is None:
+            if len(self.theory) == 1:
+                name = next(iter(self.theory))
+            elif len(self.theory) == 0:
+                raise exception.PolicyException("No policies exist.")
+            else:
+                raise exception.PolicyException(
+                    "Must choose a policy to operate on")
+        if name not in self.theory:
+            raise exception.PolicyException("Unknown policy " + str(name))
+        return self.theory[name]
+
+    def _find_policy_name(self, name_or_id):
+        """Given name or ID, return the name of the policy or KeyError."""
+        if name_or_id in self.theory:
+            return name_or_id
+        for th in self.theory.values():
+            if th.id == name_or_id:
+                return th.name
+        raise KeyError("Policy %s could not be found" % name_or_id)
+
+    def get_target_name(self, name):
+        """Resolve NAME to the name of a proper policy (even if it is None).
+
+        Raises PolicyException there is no such policy.
+        """
+        return self.get_target(name).name
+
+    def get_action_names(self, target):
+        """Return a list of the names of action tables."""
+        if target not in self.theory:
+            return []
+        actionth = self.theory[target]
+        actions = actionth.select(self.parse1('action(x)'))
+        return [action.arguments[0].name for action in actions]
+
+    def table_log(self, table, msg, *args):
+        self.tracer.log(table, "RT    : %s" % msg, *args)
+
+    def set_tracer(self, tracer):
+        if isinstance(tracer, base.Tracer):
+            self.tracer = tracer
+            for th in self.theory:
+                self.theory[th].set_tracer(tracer)
+        else:
+            self.tracer = tracer[0]
+            for th, tracr in tracer[1].items():
+                if th in self.theory:
+                    self.theory[th].set_tracer(tracr)
+
+    def get_tracer(self):
+        """Return (Runtime's tracer, dict of tracers for each theory).
+
+        Useful so we can temporarily change tracing.
+        """
+        d = {}
+        for th in self.theory:
+            d[th] = self.theory[th].get_tracer()
+        return (self.tracer, d)
+
+    def debug_mode(self):
+        tracer = base.Tracer()
+        tracer.trace('*')
+        self.set_tracer(tracer)
+
+    def production_mode(self):
+        tracer = base.Tracer()
+        self.set_tracer(tracer)
+
 
 ##############################################################################
 # ExperimentalRuntime
@@ -1017,7 +1277,7 @@ class ExperimentalRuntime (Runtime):
         return proof(s) that the query is true. If
         FIND_ALL is True, returns list; otherwise, returns single proof.
         """
-        if isinstance(query, basestring):
+        if isinstance(query, six.string_types):
             return self.explain_string(
                 query, tablenames, find_all, self.get_target(target))
         elif isinstance(query, tuple):
@@ -1029,7 +1289,7 @@ class ExperimentalRuntime (Runtime):
 
     def remediate(self, formula):
         """Event handler for remediation."""
-        if isinstance(formula, basestring):
+        if isinstance(formula, six.string_types):
             return self.remediate_string(formula)
         elif isinstance(formula, tuple):
             return self.remediate_tuple(formula)
@@ -1041,7 +1301,7 @@ class ExperimentalRuntime (Runtime):
 
         Execute a sequence of ground actions in the real world.
         """
-        if isinstance(action_sequence, basestring):
+        if isinstance(action_sequence, six.string_types):
             return self.execute_string(action_sequence)
         else:
             return self.execute_obj(action_sequence)
@@ -1054,13 +1314,13 @@ class ExperimentalRuntime (Runtime):
         the query.  Returns True iff access is granted.
         """
         # parse
-        if isinstance(action, basestring):
+        if isinstance(action, six.string_types):
             action = self.parse1(action)
             assert compile.is_atom(action), "ACTION must be an atom"
-        if isinstance(support, basestring):
+        if isinstance(support, six.string_types):
             support = self.parse(support)
         # add support to theory
-        newth = NonrecursiveRuleTheory(abbr="Temp")
+        newth = nonrecursive.NonrecursiveRuleTheory(abbr="Temp")
         newth.tracer.trace('*')
         for form in support:
             newth.insert(form)
@@ -1124,7 +1384,7 @@ class ExperimentalRuntime (Runtime):
         leaves = [leaf for leaf in proofs[0].leaves()
                   if (compile.is_atom(leaf) and
                       leaf.table in base_tables)]
-        self.table_log(None, "Leaves: %s", iterstr(leaves))
+        self.table_log(None, "Leaves: %s", utility.iterstr(leaves))
         # Query action theory for abductions of negated base tables
         actions = self.get_action_names()
         results = []
@@ -1151,7 +1411,7 @@ class ExperimentalRuntime (Runtime):
 
         For now, our execution is just logging.
         """
-        LOG.debug("Executing: %s", iterstr(actions))
+        LOG.debug("Executing: %s", utility.iterstr(actions))
         assert all(compile.is_atom(action) and action.is_ground()
                    for action in actions)
         action_names = self.get_action_names()
@@ -1173,15 +1433,6 @@ def d6service(name, keys, inbox, datapath, args):
     return DseRuntime(name, keys, inbox, datapath, args)
 
 
-def parse_tablename(tablename):
-    """Given tablename returns (service, name)."""
-    pieces = tablename.split(':')
-    if len(pieces) == 1:
-        return (None, pieces[0])
-    else:
-        return (pieces[0], ':'.join(pieces[1:]))
-
-
 class PolicySubData (object):
     def __init__(self, trigger):
         self.table_trigger = trigger
@@ -1195,10 +1446,10 @@ class PolicySubData (object):
     def changes(self):
         result = []
         for row in self.to_add:
-            event = Event(formula=row, insert=True)
+            event = compile.Event(formula=row, insert=True)
             result.append(event)
         for row in self.to_rem:
-            event = Event(formula=row, insert=False)
+            event = compile.Event(formula=row, insert=False)
             result.append(event)
         return result
 
@@ -1213,7 +1464,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
         self.d6cage = args['d6cage']
         self.rootdir = args['rootdir']
         self.policySubData = {}
-        self.log_actions_only = args.get('log_actions_only', False)
+        self.log_actions_only = args['log_actions_only']
 
     def extend_schema(self, service_name, schema):
         newschema = {}
@@ -1237,8 +1488,8 @@ class DseRuntime (Runtime, deepsix.deepSix):
             self.receive_data_full(msg)
         else:
             # grab an item from any iterable
-            dataelem = iter(msg.body.data).next()
-            if isinstance(dataelem, Event):
+            dataelem = next(iter(msg.body.data))
+            if isinstance(dataelem, compile.Event):
                 self.receive_data_update(msg)
             else:
                 self.receive_data_full(msg)
@@ -1246,7 +1497,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
     def receive_data_full(self, msg):
         """Handler for when dataservice publishes full table."""
         self.log("received full data msg for %s: %s",
-                 msg.header['dataindex'], iterstr(msg.body.data))
+                 msg.header['dataindex'], utility.iterstr(msg.body.data))
         tablename = msg.header['dataindex']
         service = msg.replyTo
 
@@ -1259,7 +1510,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
     def receive_data_update(self, msg):
         """Handler for when dataservice publishes a delta."""
         self.log("received update data msg for %s: %s",
-                 msg.header['dataindex'], iterstr(msg.body.data))
+                 msg.header['dataindex'], utility.iterstr(msg.body.data))
         events = msg.body.data
         for event in events:
             assert compile.is_atom(event.formula), (
@@ -1269,21 +1520,21 @@ class DseRuntime (Runtime, deepsix.deepSix):
             event.target = msg.replyTo
         (permitted, changes) = self.update(events)
         if not permitted:
-            raise CongressException(
+            raise exception.CongressException(
                 "Update not permitted." + '\n'.join(str(x) for x in changes))
         else:
             tablename = msg.header['dataindex']
             service = msg.replyTo
             self.log("update data msg for %s from %s caused %d "
                      "changes: %s", tablename, service, len(changes),
-                     iterstr(changes))
+                     utility.iterstr(changes))
             if tablename in self.theory[service].tablenames():
                 rows = self.theory[service].content([tablename])
-                self.log("current table: %s", iterstr(rows))
+                self.log("current table: %s", utility.iterstr(rows))
 
     def receive_policy_update(self, msg):
         self.log("received policy-update msg %s",
-                 iterstr(msg.body.data))
+                 utility.iterstr(msg.body.data))
         # update the policy and subscriptions to data tables.
         self.last_policy_change = self.process_policy_update(msg.body.data)
 
@@ -1317,7 +1568,8 @@ class DseRuntime (Runtime, deepsix.deepSix):
         # subscribe to the new tables (loading services as required)
         for table in add:
             if not self.reserved_tablename(table):
-                (service, tablename) = compile.parse_tablename(table)
+                (service, tablename) = compile.Tablename.parse_service_table(
+                    table)
                 if service is not None:
                     self.log("Subscribing to new (service, table): (%s, %s)",
                              service, tablename)
@@ -1326,7 +1578,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
 
         # unsubscribe from the old tables
         for table in rem:
-            (service, tablename) = compile.parse_tablename(table)
+            (service, tablename) = compile.Tablename.parse_service_table(table)
             if service is not None:
                 self.log("Unsubscribing to new (service, table): (%s, %s)",
                          service, tablename)
@@ -1342,6 +1594,12 @@ class DseRuntime (Runtime, deepsix.deepSix):
             {'positional': ['p_arg1', 'p_arg2'],
             'named': {'name1': 'n_arg1', 'name2': 'n_arg2'}}.
         """
+        if not self.log_actions_only:
+            LOG.info("action %s is called with args %s on %s, but "
+                     "current configuration doesn't allow Congress to "
+                     "execute any action.", action, action_args, service_name)
+            return
+
         # Log the execution
         LOG.info("%s:: executing: %s:%s on %s",
                  self.name, service_name, action, action_args)
@@ -1353,19 +1611,21 @@ class DseRuntime (Runtime, deepsix.deepSix):
             if 'named' in action_args:
                 named_args = ", ".join(
                     "%s=%s" % (key, val)
-                    for key, val in action_args['named'].iteritems())
+                    for key, val in action_args['named'].items())
             delimit = ''
             if pos_args and named_args:
                 delimit = ', '
             self.logger.info(
                 "Executing %s:%s(%s%s%s)",
                 service_name, action, pos_args, delimit, named_args)
-        if self.log_actions_only:
-            return
+
         # execute the action on a service in the DSE
         service = self.d6cage.service_object(service_name)
         if not service:
-            raise PolicyException("Service %s not found" % service_name)
+            raise exception.PolicyException(
+                "Service %s not found" % service_name)
+        if not action:
+            raise exception.PolicyException("Action not found")
         LOG.info("Sending request(%s:%s), args = %s",
                  service.name, action, action_args)
         self.request(service.name, action, args=action_args)
@@ -1390,7 +1650,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
         """
 
         dataindex = msg.header['dataindex']
-        (policy, tablename) = parse_tablename(dataindex)
+        (policy, tablename) = compile.Tablename.parse_service_table(dataindex)
         # we only care about policy table subscription
         if policy is None:
             return
@@ -1405,7 +1665,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
         """Remove triggers when unsubscribe."""
         dataindex = msg.header['dataindex']
         sender = msg.replyTo
-        (policy, tablename) = parse_tablename(dataindex)
+        (policy, tablename) = compile.Tablename.parse_service_table(dataindex)
         if (tablename, policy, None) in self.policySubData:
             # release resource if no one cares about it any more
             subs = self.pubdata[dataindex].getsubscribers()
@@ -1436,7 +1696,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
                 return []
             return data
         # grab deltas to publish to subscribers
-        (policy, tablename) = parse_tablename(dataindex)
+        (policy, tablename) = compile.Tablename.parse_service_table(dataindex)
         result = self.policySubData[(tablename, policy, None)].changes()
         if len(result) == 0:
             # Policy engine expects an empty update to be an init msg
@@ -1445,7 +1705,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
             result = None
             text = "None"
         else:
-            text = iterstr(result)
+            text = utility.iterstr(result)
         self.log("prepush_processor for <%s> returning with %s items",
                  dataindex, text)
         return result
@@ -1459,7 +1719,8 @@ class DseRuntime (Runtime, deepsix.deepSix):
             LOG.debug("%s:: checking for missing trigger table %s",
                       self.name, table)
             if table not in self.execution_triggers:
-                (policy, tablename) = compile.parse_tablename(table)
+                (policy, tablename) = compile.Tablename.parse_service_table(
+                    table)
                 LOG.debug("creating new trigger for policy=%s, table=%s",
                           policy, tablename)
                 trig = self.trigger_registry.register_table(
@@ -1487,7 +1748,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
         # LOG.info("execute_table(theory=%s, table=%s, old=%s, new=%s",
         #          theory, table, ";".join(str(x) for x in old),
         #          ";".join(str(x) for x in new))
-        service, tablename = compile.parse_tablename(table)
+        service, tablename = compile.Tablename.parse_service_table(table)
         service = service or theory
         for newlit in new - old:
             args = [term.name for term in newlit.arguments]
@@ -1495,5 +1756,5 @@ class DseRuntime (Runtime, deepsix.deepSix):
                      self.name, service, tablename, args)
             try:
                 self.execute_action(service, tablename, {'positional': args})
-            except PolicyException as e:
+            except exception.PolicyException as e:
                 LOG.error(str(e))

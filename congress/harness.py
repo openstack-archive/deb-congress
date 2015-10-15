@@ -19,14 +19,13 @@ import os.path
 import re
 import sys
 
-from congress.datalog.base import ACTION_POLICY_TYPE
-from congress.db import db_policy_rules
+from oslo_config import cfg
+from oslo_log import log as logging
+
+from congress.datalog import base
 from congress.dse import d6cage
 from congress import exception
 from congress.managers import datasource as datasource_manager
-from congress.openstack.common import log as logging
-
-from oslo.config import cfg
 
 
 LOG = logging.getLogger(__name__)
@@ -62,7 +61,8 @@ def create(rootdir, config_override=None):
         name="engine",
         moduleName="PolicyEngine",
         description="Policy Engine (DseRuntime instance)",
-        args={'d6cage': cage, 'rootdir': src_path})
+        args={'d6cage': cage, 'rootdir': src_path,
+              'log_actions_only': cfg.CONF.enable_execute_action})
     engine = cage.service_object('engine')
     engine.initialize_table_subscriptions()
     engine.debug_mode()  # should take this out for production
@@ -117,6 +117,16 @@ def create(rootdir, config_override=None):
         description="API-status DSE instance",
         args={'policy_engine': engine})
 
+    # add action api
+    api_path = os.path.join(src_path, "api/action_model.py")
+    LOG.info("main::start() api_path: %s", api_path)
+    cage.loadModule("API-action", api_path)
+    cage.createservice(
+        name="api-action",
+        moduleName="API-action",
+        description="API-action DSE instance",
+        args={'policy_engine': engine})
+
     # add schema api
     api_path = os.path.join(src_path, "api/schema_model.py")
     LOG.info("main::start() api_path: %s", api_path)
@@ -148,9 +158,7 @@ def create(rootdir, config_override=None):
         args={'policy_engine': engine})
 
     # Load policies from database
-    for policy in db_policy_rules.get_policies():
-        engine.create_policy(
-            policy.name, abbr=policy.abbreviation, kind=policy.kind)
+    engine.persistent_load_policies()
 
     # if this is the first time we are running Congress, need
     #   to create the default theories (which cannot be deleted)
@@ -167,7 +175,7 @@ def create(rootdir, config_override=None):
     engine.ACTION_THEORY = 'action'
     engine.builtin_policy_names.add(engine.ACTION_THEORY)
     try:
-        api_policy.add_item({'kind': ACTION_POLICY_TYPE,
+        api_policy.add_item({'kind': base.ACTION_POLICY_TYPE,
                              'name': engine.ACTION_THEORY,
                              'description': 'default action policy'},
                             {})
@@ -214,25 +222,7 @@ def create(rootdir, config_override=None):
     # Insert rules.  Needs to be done after datasources are loaded
     #  so that we can compile away column references at read time.
     #  If datasources loaded after this, we don't have schemas.
-    rules = db_policy_rules.get_policy_rules()
-    for rule in rules:
-        parsed_rule = engine.parse1(rule.rule)
-        cage.service_object('api-rule').change_rule(
-            parsed_rule,
-            {'policy_id': rule.policy_name})
-
-    # Start datasource synchronizer after explicitly starting the
-    # datasources, because the explicit call to create a datasource
-    # will crash if the synchronizer creates the datasource first.
-    synchronizer_path = os.path.join(src_path, "synchronizer.py")
-    LOG.info("main::start() synchronizer: %s", synchronizer_path)
-    cage.loadModule("Synchronizer", synchronizer_path)
-    cage.createservice(
-        name="synchronizer",
-        moduleName="Synchronizer",
-        description="DB synchronizer instance",
-        args={'poll_time': cfg.CONF.datasource_sync_period})
-    synchronizer = cage.service_object('synchronizer')
+    engine.persistent_load_rules()
 
     # add datasource api
     api_path = os.path.join(src_path, "api/datasource_model.py")
@@ -242,7 +232,7 @@ def create(rootdir, config_override=None):
         name="api-datasource",
         moduleName="API-datasource",
         description="API-datasource DSE instance",
-        args={'policy_engine': engine, 'synchronizer': synchronizer})
+        args={'policy_engine': engine})
 
     return cage
 

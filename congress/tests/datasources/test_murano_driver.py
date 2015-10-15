@@ -29,7 +29,7 @@ sys.modules['muranoclient.common.exceptions'] = mock.Mock()
 
 from congress.datasources import murano_driver
 from congress.tests import base
-from congress.tests.datasources.util import ResponseObj
+from congress.tests.datasources import util
 from congress.tests import helper
 
 
@@ -44,6 +44,7 @@ class TestMuranoDriver(base.TestCase):
         self.murano_client.services.list.return_value = service_response
         self.murano_client.deployments.list.return_value = deployment_response
         self.murano_client.packages.list.return_value = package_response
+        self.murano_client.actions.call.return_value = action_response
         args = helper.datasource_openstack_args()
         self.driver = murano_driver.MuranoDriver(args=args)
         self.driver.murano_client = self.murano_client
@@ -255,9 +256,29 @@ class TestMuranoDriver(base.TestCase):
             self.assertTrue(row in connected,
                             msg=("%s not in connected" % str(row)))
 
+    def test_execute(self):
+        """Test action execution."""
+        self.driver.state[self.driver.OBJECTS] = set()
+        self.driver.state[self.driver.PROPERTIES] = set()
+        self.driver.state[self.driver.PARENT_TYPES] = set()
+        self.driver.state[self.driver.RELATIONSHIPS] = set()
+        envs = self.driver.murano_client.environments.list()
+        pkgs = self.driver.murano_client.packages.list()
+        # package properties are needed for mapping parent_types
+        self.driver._translate_packages(pkgs)
+        self.driver._translate_services(envs)
+
+        action = 'muranoaction'
+        action_args = {'positional': ['ad9762b2d82f44ca8b8a6ce4a19dd1cc',
+                                      '769af50c-9629-4694-b623-e9b392941279',
+                                      'restartVM']}
+        self.driver.execute(action, action_args)
+        self.assertTrue(action_response in self.driver.action_call_returns)
+
+
 # Sample responses from murano-client
 env_response = [
-    ResponseObj({
+    util.ResponseObj({
         u'created': u'2015-03-24T18:35:14',
         u'id': u'ad9762b2d82f44ca8b8a6ce4a19dd1cc',
         u'name': u'quick-env-2',
@@ -268,9 +289,10 @@ env_response = [
         u'version': 1})]
 
 service_response = [
-    ResponseObj({
+    util.ResponseObj({
         u'?': {u'_26411a1861294160833743e45d0eaad9': {u'name': u'MySQL'},
-               u'_actions': {},
+               u'_actions': {u'74f5b2d2-1f8d-4b1a-8238-4155ce2cadb2_restartVM':
+                             {u'enabled': True, u'name': u'restartVM'}},
                u'id': u'769af50c-9629-4694-b623-e9b392941279',
                u'status': u'deploy failure',
                u'type': u'io.murano.databases.MySql'},
@@ -296,7 +318,7 @@ service_response = [
         u'name': u'MySqlDB',
         u'password': u'Passw0rd.',
         u'username': u''}),
-    ResponseObj({
+    util.ResponseObj({
         u'?': {u'_26411a1861294160833743e45d0eaad9':
                {u'name': u'Apache Tomcat'},
                u'_actions': {},
@@ -322,7 +344,7 @@ service_response = [
                       u'securityGroupName': None,
                       u'sharedIps': []},
         u'name': u'Tomcat'}),
-    ResponseObj({
+    util.ResponseObj({
         u'?': {u'_26411a1861294160833743e45d0eaad9': {u'name': u'PetClinic'},
                u'_actions': {},
                u'id': u'fda74653-8b66-42e2-be16-12ebc87d7570',
@@ -338,7 +360,7 @@ service_response = [
         u'https://dl.dropboxusercontent.com/u/1684617/petclinic.war'})]
 
 deployment_response = [
-    ResponseObj({
+    util.ResponseObj({
         u'action': {u'args': {},
                     u'method': u'deploy',
                     u'object_id': u'ad9762b2d82f44ca8b8a6ce4a19dd1cc'},
@@ -413,7 +435,7 @@ deployment_response = [
         u'updated': u'2015-03-24T18:46:56'})]
 
 package_response = [
-    ResponseObj({
+    util.ResponseObj({
         u'author': u'Mirantis, Inc',
         u'categories': [],
         u'class_definitions': [u'io.murano.apps.apache.Tomcat'],
@@ -431,7 +453,7 @@ package_response = [
         u'tags': [u'Servlets', u'Server', u'Pages', u'Java'],
         u'type': u'Application',
         u'updated': u'2015-03-23T21:28:11'}),
-    ResponseObj({
+    util.ResponseObj({
         u'author': u'Mirantis, Inc',
         u'categories': [],
         u'class_definitions': [u'io.murano.apps.linux.Git'],
@@ -447,7 +469,7 @@ package_response = [
         u'tags': [u'Linux', u'connection'],
         u'type': u'Application',
         u'updated': u'2015-03-23T21:26:56'}),
-    ResponseObj({
+    util.ResponseObj({
         u'author': u'Mirantis, Inc',
         u'categories': [],
         u'class_definitions': [u'io.murano.databases.MySql'],
@@ -465,7 +487,7 @@ package_response = [
         u'tags': [u'Database', u'MySql', u'SQL', u'RDBMS'],
         u'type': u'Application',
         u'updated': u'2015-03-23T21:28:58'}),
-    ResponseObj({
+    util.ResponseObj({
         u'author': u'Mirantis, Inc',
         u'categories': [],
         u'class_definitions': [u'io.murano.apps.java.PetClinic'],
@@ -483,7 +505,7 @@ package_response = [
         u'tags': [u'Servlets', u'Server', u'Pages', u'Java'],
         u'type': u'Application',
         u'updated': u'2015-03-24T18:25:24'}),
-    ResponseObj({
+    util.ResponseObj({
         u'author': u'Mirantis, Inc',
         u'categories': [],
         u'class_definitions': [u'io.murano.databases.PostgreSql'],
@@ -503,7 +525,7 @@ package_response = [
         u'tags': [u'Database', u'Postgre', u'SQL', u'RDBMS'],
         u'type': u'Application',
         u'updated': u'2015-03-23T21:29:10'}),
-    ResponseObj({
+    util.ResponseObj({
         u'author': u'Mirantis, Inc',
         u'categories': [],
         u'class_definitions': [u'io.murano.databases.SqlDatabase'],
@@ -520,6 +542,8 @@ package_response = [
         u'tags': [u'SQL', u'RDBMS'],
         u'type': u'Library',
         u'updated': u'2015-03-24T18:26:32'})]
+
+action_response = 'c79eb72600024fa1995345a2b2eb3acd'
 
 # Expected datasource table content
 expected_states = [

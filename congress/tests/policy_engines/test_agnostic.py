@@ -12,14 +12,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import ACTION_POLICY_TYPE
-from congress.datalog.base import DATABASE_POLICY_TYPE
-from congress.datalog.base import MATERIALIZED_POLICY_TYPE
-from congress.datalog.base import NONRECURSIVE_POLICY_TYPE
+import mock
+from oslo_log import log as logging
+
+from congress.datalog import base as datalog_base
 from congress.datalog import compile
-from congress.datalog.compile import Fact
-from congress.exception import DanglingReference
-from congress.openstack.common import log as logging
+from congress.datalog import database
+from congress.datalog import materialized
+from congress.datalog import nonrecursive
+from congress.datalog import utility
+from congress.db import db_policy_rules
+from congress import exception
 from congress.policy_engines import agnostic
 from congress.tests import base
 from congress.tests import helper
@@ -39,9 +42,9 @@ class TestRuntime(base.TestCase):
     def test_theory_inclusion(self):
         """Test evaluation routines when one theory includes another."""
         # spread out across inclusions
-        th1 = agnostic.NonrecursiveRuleTheory()
-        th2 = agnostic.NonrecursiveRuleTheory()
-        th3 = agnostic.NonrecursiveRuleTheory()
+        th1 = nonrecursive.NonrecursiveRuleTheory()
+        th2 = nonrecursive.NonrecursiveRuleTheory()
+        th3 = nonrecursive.NonrecursiveRuleTheory()
         th1.includes.append(th2)
         th2.includes.append(th3)
 
@@ -64,9 +67,9 @@ class TestRuntime(base.TestCase):
         run.create_policy('th1')
         run.create_policy('th2')
 
-        events1 = [agnostic.Event(formula=x, insert=True, target='th1')
+        events1 = [compile.Event(formula=x, insert=True, target='th1')
                    for x in helper.str2pol("p(1) p(2) q(1) q(3)")]
-        events2 = [agnostic.Event(formula=x, insert=True, target='th2')
+        events2 = [compile.Event(formula=x, insert=True, target='th2')
                    for x in helper.str2pol("r(1) r(2) t(1) t(4)")]
         run.update(events1 + events2)
 
@@ -80,7 +83,7 @@ class TestRuntime(base.TestCase):
         run = agnostic.Runtime()
         run.create_policy('test')
         run.insert('p(1) p(2)')
-        facts = [Fact('p', (3,)), Fact('p', (4,))]
+        facts = [compile.Fact('p', (3,)), compile.Fact('p', (4,))]
         run.initialize_tables(['p'], facts)
         e = helper.datalog_equal(run.select('p(x)'), 'p(3) p(4)')
         self.assertTrue(e)
@@ -128,21 +131,21 @@ class TestRuntime(base.TestCase):
         """Test types for multiple policies."""
         # policy types
         run = agnostic.Runtime()
-        run.create_policy('test1', kind=NONRECURSIVE_POLICY_TYPE)
+        run.create_policy('test1', kind=datalog_base.NONRECURSIVE_POLICY_TYPE)
         self.assertTrue(isinstance(run.policy_object('test1'),
-                        agnostic.NonrecursiveRuleTheory),
+                        nonrecursive.NonrecursiveRuleTheory),
                         'Nonrecursive policy addition')
-        run.create_policy('test2', kind=ACTION_POLICY_TYPE)
+        run.create_policy('test2', kind=datalog_base.ACTION_POLICY_TYPE)
         self.assertTrue(isinstance(run.policy_object('test2'),
-                        agnostic.ActionTheory),
+                        nonrecursive.ActionTheory),
                         'Action policy addition')
-        run.create_policy('test3', kind=DATABASE_POLICY_TYPE)
+        run.create_policy('test3', kind=datalog_base.DATABASE_POLICY_TYPE)
         self.assertTrue(isinstance(run.policy_object('test3'),
-                        agnostic.Database),
+                        database.Database),
                         'Database policy addition')
-        run.create_policy('test4', kind=MATERIALIZED_POLICY_TYPE)
+        run.create_policy('test4', kind=datalog_base.MATERIALIZED_POLICY_TYPE)
         self.assertTrue(isinstance(run.policy_object('test4'),
-                        agnostic.MaterializedViewTheory),
+                        materialized.MaterializedViewTheory),
                         'Materialized policy addition')
 
     def test_policy_errors(self):
@@ -171,14 +174,35 @@ class TestRuntime(base.TestCase):
     def test_tablenames(self):
         run = agnostic.Runtime()
         run.create_policy('test')
-        run.insert('p(x) :- q(x)')
-        run.insert('q(x) :- r(x)')
+        run.insert('p(x) :- q(x,y)')
+        run.insert('q(x,y) :- r(x,y)')
+        run.insert('t(x) :- q(x,y), r(x,z), equal(y, z)')
         run.insert('execute[nova:disconnect(x, y)] :- s(x, y)')
         tables = run.tablenames()
         self.assertEqual(
-            set(tables), set(['p', 'q', 'r', 's', 'nova:disconnect']))
+            set(tables), set(['p', 'q', 'r', 's', 't', 'nova:disconnect']))
+        tables = run.tablenames(include_builtin=True)
+        self.assertEqual(
+            set(tables),
+            set(['p', 'q', 'r', 's', 't', 'nova:disconnect', 'equal']))
         tables = run.tablenames(body_only=True)
         self.assertEqual(set(tables), set(['q', 'r', 's']))
+
+    @mock.patch.object(db_policy_rules, 'add_policy', side_effect=Exception())
+    def test_persistent_create_policy_with_db_exception(self, mock_add):
+        run = agnostic.Runtime()
+        with mock.patch.object(run, 'delete_policy') as mock_delete:
+            policy_name = 'test_policy'
+            self.assertRaises(exception.PolicyException,
+                              run.persistent_create_policy,
+                              policy_name)
+            mock_add.assert_called_once_with(mock.ANY,
+                                             policy_name,
+                                             policy_name[:5],
+                                             mock.ANY,
+                                             'user',
+                                             'nonrecursive')
+            mock_delete.assert_called_once_with(policy_name)
 
 
 class TestArity(base.TestCase):
@@ -848,8 +872,8 @@ class TestMultipolicyRules(base.TestCase):
         self.assertTrue(g.edge_in('test:p', 'test:s', False))
         self.assertTrue(g.edge_in('test:q', 'nova:r', False))
 
-        run.update([agnostic.Event(helper.str2form('p(x) :- q(x), nova:q(x)'),
-                                   target='test')])
+        run.update([compile.Event(helper.str2form('p(x) :- q(x), nova:q(x)'),
+                                  target='test')])
         self.assertTrue(g.edge_in('test:p', 'nova:q', False))
         self.assertTrue(g.edge_in('test:p', 'test:q', False))
         self.assertTrue(g.edge_in('test:p', 'test:s', False))
@@ -915,7 +939,7 @@ class TestPolicyCreationDeletion(base.TestCase):
         run.delete_policy('test2')
         # add the policy back, this time checking for dangling refs
         run.create_policy('test2')
-        self.assertRaises(DanglingReference, run.delete_policy,
+        self.assertRaises(exception.DanglingReference, run.delete_policy,
                           'test2', disallow_dangling_refs=True)
 
     def test_policy_deletion_dependency_graph(self):
@@ -990,12 +1014,12 @@ class TestSimulate(base.TestCase):
         actth = self.ACTION_THEORY
         permitted, errors = run.insert(action_code, target=actth)
         self.assertTrue(permitted, "Error in action policy: {}".format(
-            agnostic.iterstr(errors)))
+            utility.iterstr(errors)))
 
         defth = self.DEFAULT_THEORY
         permitted, errors = run.insert(class_code, target=defth)
         self.assertTrue(permitted, "Error in classifier policy: {}".format(
-            agnostic.iterstr(errors)))
+            utility.iterstr(errors)))
 
         return run
 
@@ -1182,10 +1206,8 @@ class TestSimulate(base.TestCase):
         self.check(run, action_sequence, 'hasval(x)', 'hasval(1)',
                    'Action sequence with results')
 
-    def test_delta(self):
+    def test_delta_add(self):
         """Test when asking for changes in query."""
-
-        # Add
         action_code = ('action("q") '
                        'p+(x) :- q(x) ')
         classify_code = 'p(2)'  # just some other data present
@@ -1194,7 +1216,8 @@ class TestSimulate(base.TestCase):
         self.check(run, action_sequence, 'p(x)', 'p+(1)', 'Add',
                    delta=True)
 
-        # Delete
+    def test_delta_delete(self):
+        """Test when asking for changes in query."""
         action_code = ('action("q") '
                        'p-(x) :- q(x) ')
         classify_code = 'p(1) p(2)'  # p(2): just some other data present
@@ -1203,7 +1226,8 @@ class TestSimulate(base.TestCase):
         self.check(run, action_sequence, 'p(x)', 'p-(1)', 'Delete',
                    delta=True)
 
-        # Add and delete
+    def test_delta_add_delete(self):
+        """Test when asking for changes in query."""
         action_code = ('action("act") '
                        'p+(x) :- act(x) '
                        'p-(y) :- act(x), r(x, y) ')
@@ -1264,13 +1288,27 @@ class TestSimulate(base.TestCase):
 
 
 class TestActionExecution(base.TestCase):
+    class FakeCage(object):
+        def __init__(self, name):
+            self.name = name
+
+        def service_object(self, name):
+            if self.name == name:
+                return self
+            else:
+                return None
+
     def test_insert_rule_insert_data(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('execute[p(x)] :- q(x)')
@@ -1278,14 +1316,25 @@ class TestActionExecution(base.TestCase):
         run.insert('q(1)')
         self.assertEqual(len(run.logger.messages), 1, "No action logged")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
+
+        expected_args = ('test', 'p')
+        expected_kwargs = {'args': {'positional': [1]}}
+        args, kwargs = run.request.call_args_list[0]
+
+        self.assertEqual(expected_args, args)
+        self.assertEqual(expected_kwargs, kwargs)
 
     def test_insert_data_insert_rule(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('q(1)')
@@ -1294,13 +1343,24 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "No action logged")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
+        expected_args = ('test', 'p')
+        expected_kwargs = {'args': {'positional': [1]}}
+        args, kwargs = run.request.call_args_list[0]
+
+        self.assertEqual(expected_args, args)
+        self.assertEqual(expected_kwargs, kwargs)
+
     def test_insert_data_insert_rule_delete_data(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('q(1)')
@@ -1312,13 +1372,24 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "Delete failure")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
+        expected_args = ('test', 'p')
+        expected_kwargs = {'args': {'positional': [1]}}
+        args, kwargs = run.request.call_args_list[0]
+
+        self.assertEqual(expected_args, args)
+        self.assertEqual(expected_kwargs, kwargs)
+
     def test_insert_data_insert_rule_delete_rule(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('q(1)')
@@ -1330,13 +1401,24 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "Delete failure")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
+        expected_args = ('test', 'p')
+        expected_kwargs = {'args': {'positional': [1]}}
+        args, kwargs = run.request.call_args_list[0]
+
+        self.assertEqual(expected_args, args)
+        self.assertEqual(expected_kwargs, kwargs)
+
     def test_insert_data_insert_rule_noop_insert(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('q(1)')
@@ -1348,13 +1430,24 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "Delete failure")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
+        expected_args = ('test', 'p')
+        expected_kwargs = {'args': {'positional': [1]}}
+        args, kwargs = run.request.call_args_list[0]
+
+        self.assertEqual(expected_args, args)
+        self.assertEqual(expected_kwargs, kwargs)
+
     def test_disjunction(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('execute[p(x)] :- q(x)')
@@ -1367,13 +1460,24 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "Delete failure")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
+        expected_args = ('test', 'p')
+        expected_kwargs = {'args': {'positional': [1]}}
+        args, kwargs = run.request.call_args_list[0]
+
+        self.assertEqual(expected_args, args)
+        self.assertEqual(expected_kwargs, kwargs)
+
     def test_multiple_instances(self):
         args = {}
-        args['d6cage'] = None
+        args['d6cage'] = TestActionExecution.FakeCage('test')
         args['rootdir'] = None
         args['log_actions_only'] = True
         run = agnostic.DseRuntime(
             name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
         run.create_policy('test')
         run.debug_mode()
         run.insert('q(1)')
@@ -1383,3 +1487,84 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 2, "No action logged")
         actualset = set([u'Executing test:p(1)', u'Executing test:p(2)'])
         self.assertEqual(actualset, set(run.logger.messages))
+
+        expected_args_list = [
+            [('test', 'p'), {'args': {'positional': [1]}}],
+            [('test', 'p'), {'args': {'positional': [2]}}],
+        ]
+
+        for args, kwargs in run.request.call_args_list:
+            self.assertTrue([args, kwargs] in expected_args_list)
+            expected_args_list.remove([args, kwargs])
+
+    def test_disabled_execute_action(self):
+        args = {}
+        args['d6cage'] = None
+        args['rootdir'] = None
+        args['log_actions_only'] = False
+        run = agnostic.DseRuntime(
+            name='test', keys='', inbox=None, datapath=None, args=args)
+
+        run.request = mock.Mock()
+        run.request.return_value = 'mocked request'
+
+        service_name = 'test-service'
+        action = 'non_executable_action'
+        action_args = {'positional': ['p_arg1'],
+                       'named': {'key1': 'value1'}}
+
+        run.execute_action(service_name, action, action_args)
+        self.assertFalse(run.request.called)
+
+
+class TestDelegation(base.TestCase):
+    """Tests for Runtime's delegation functionality."""
+
+    def test_subpolicy(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        policy = 'error(x) :- q(x), r(x)'
+        run.insert(policy)
+        subpolicy = run.find_subpolicy(
+            set(['q']), set(), set(['error', 'warning']))
+        e = helper.datalog_equal(subpolicy, policy)
+        self.assertTrue(e)
+
+    def test_subpolicy_multiple(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        policy = ('error(x) :- q(x), r(x) '
+                  'error(x) :- q(x), s(x) '
+                  'warning(x) :- t(x), q(x)')
+        run.insert(policy)
+        subpolicy = run.find_subpolicy(
+            set(['q']), set(), set(['error', 'warning']))
+        e = helper.datalog_equal(subpolicy, policy)
+        self.assertTrue(e)
+
+    def test_subpolicy_prohibited(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        policy1 = 'error(x) :- q(x), r(x) '
+        policy2 = 'error(x) :- q(x), s(x) '
+        policy3 = 'error(x) :- q(x), prohibit(x, y) '
+        policy4 = 'warning(x) :- t(x), q(x)'
+        run.insert(policy1 + policy2 + policy3 + policy4)
+        subpolicy = run.find_subpolicy(
+            set(['q']), set(['prohibit']), set(['error', 'warning']))
+        e = helper.datalog_equal(subpolicy, policy1 + policy2 + policy4)
+        self.assertTrue(e)
+
+    def test_subpolicy_layers(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        policy1 = 'error(x) :- t(x), u(x) '
+        policy2 = '    t(x) :- q(x), s(x) '
+        policy3 = 'error(x) :- p(x) '
+        policy4 = '    p(x) :- prohibit(x, y)'
+        policy5 = 'warning(x) :- t(x), q(x)'
+        run.insert(policy1 + policy2 + policy3 + policy4 + policy5)
+        subpolicy = run.find_subpolicy(
+            set(['q']), set(['prohibit']), set(['error', 'warning']))
+        e = helper.datalog_equal(subpolicy, policy1 + policy2 + policy5)
+        self.assertTrue(e)

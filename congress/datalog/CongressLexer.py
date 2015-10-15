@@ -1,4 +1,4 @@
-# $ANTLR 3.5 /Users/thinrichs/Code/congress/congress/datalog/Congress.g 2015-04-14 16:46:46
+# $ANTLR 3.5 /Users/tim/opencode/congress/congress/datalog/Congress.g 2015-08-03 09:06:22
 
 import sys
 from antlr3 import *
@@ -11,9 +11,12 @@ HIDDEN = BaseRecognizer.HIDDEN
 
 # token types
 EOF=-1
-T__52=52
 T__53=53
 T__54=54
+T__55=55
+T__56=56
+T__57=57
+T__58=58
 AND=4
 ATOM=5
 BYTESTRPREFIX=6
@@ -28,45 +31,46 @@ COMMA=14
 COMMENT=15
 DIGIT=16
 EQUAL=17
-EXPONENT=18
-FLOAT=19
-FLOAT_EXP=20
-FLOAT_NO_EXP=21
-FLOAT_OBJ=22
-FRAC_PART=23
-HEX_DIGIT=24
-ID=25
-INT=26
-INTEGER_OBJ=27
-INT_PART=28
-LBRACKET=29
-LITERAL=30
-LPAREN=31
-MODAL=32
-NAMED_PARAM=33
-NEGATION=34
-NOT=35
-PROG=36
-RBRACKET=37
-RPAREN=38
-RULE=39
-SIGN=40
-SLBYTESTRING=41
-SLSTRING=42
-STRING=43
-STRING_ESC=44
-STRING_OBJ=45
-STRPREFIX=46
-STRUCTURED_NAME=47
-SYMBOL_OBJ=48
-THEORY=49
-VARIABLE=50
-WS=51
+EVENT=18
+EXPONENT=19
+FLOAT=20
+FLOAT_EXP=21
+FLOAT_NO_EXP=22
+FLOAT_OBJ=23
+FRAC_PART=24
+HEX_DIGIT=25
+ID=26
+INT=27
+INTEGER_OBJ=28
+INT_PART=29
+LBRACKET=30
+LITERAL=31
+LPAREN=32
+MODAL=33
+NAMED_PARAM=34
+NEGATION=35
+NOT=36
+PROG=37
+RBRACKET=38
+RPAREN=39
+RULE=40
+SIGN=41
+SLBYTESTRING=42
+SLSTRING=43
+STRING=44
+STRING_ESC=45
+STRING_OBJ=46
+STRPREFIX=47
+STRUCTURED_NAME=48
+SYMBOL_OBJ=49
+THEORY=50
+VARIABLE=51
+WS=52
 
 
 class CongressLexer(Lexer):
 
-    grammarFileName = "/Users/thinrichs/Code/congress/congress/datalog/Congress.g"
+    grammarFileName = "/Users/tim/opencode/congress/congress/datalog/Congress.g"
     api_version = 1
 
     def __init__(self, input=None, state=None):
@@ -131,8 +135,8 @@ class CongressLexer(Lexer):
             _type = COLONMINUS
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:7:12: ( ':-' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:7:14: ':-'
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:7:12: ( ':-' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:7:14: ':-'
             pass 
             self.match(":-")
 
@@ -154,8 +158,8 @@ class CongressLexer(Lexer):
             _type = COMMA
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:8:7: ( ',' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:8:9: ','
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:8:7: ( ',' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:8:9: ','
             pass 
             self.match(44)
 
@@ -176,8 +180,8 @@ class CongressLexer(Lexer):
             _type = LBRACKET
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:9:10: ( '[' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:9:12: '['
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:9:10: ( '[' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:9:12: '['
             pass 
             self.match(91)
 
@@ -198,8 +202,8 @@ class CongressLexer(Lexer):
             _type = LPAREN
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:10:8: ( '(' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:10:10: '('
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:10:8: ( '(' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:10:10: '('
             pass 
             self.match(40)
 
@@ -220,8 +224,8 @@ class CongressLexer(Lexer):
             _type = RBRACKET
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:11:10: ( ']' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:11:12: ']'
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:11:10: ( ']' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:11:12: ']'
             pass 
             self.match(93)
 
@@ -242,8 +246,8 @@ class CongressLexer(Lexer):
             _type = RPAREN
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:12:8: ( ')' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:12:10: ')'
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:12:8: ( ')' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:12:10: ')'
             pass 
             self.match(41)
 
@@ -258,38 +262,16 @@ class CongressLexer(Lexer):
 
 
 
-    # $ANTLR start "T__52"
-    def mT__52(self, ):
-        try:
-            _type = T__52
-            _channel = DEFAULT_CHANNEL
-
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:13:7: ( '.' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:13:9: '.'
-            pass 
-            self.match(46)
-
-
-
-            self._state.type = _type
-            self._state.channel = _channel
-        finally:
-            pass
-
-    # $ANTLR end "T__52"
-
-
-
     # $ANTLR start "T__53"
     def mT__53(self, ):
         try:
             _type = T__53
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:14:7: ( ':' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:14:9: ':'
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:13:7: ( '.' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:13:9: '.'
             pass 
-            self.match(58)
+            self.match(46)
 
 
 
@@ -308,10 +290,10 @@ class CongressLexer(Lexer):
             _type = T__54
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:15:7: ( ';' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:15:9: ';'
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:14:7: ( ':' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:14:9: ':'
             pass 
-            self.match(59)
+            self.match(58)
 
 
 
@@ -324,13 +306,104 @@ class CongressLexer(Lexer):
 
 
 
+    # $ANTLR start "T__55"
+    def mT__55(self, ):
+        try:
+            _type = T__55
+            _channel = DEFAULT_CHANNEL
+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:15:7: ( ';' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:15:9: ';'
+            pass 
+            self.match(59)
+
+
+
+            self._state.type = _type
+            self._state.channel = _channel
+        finally:
+            pass
+
+    # $ANTLR end "T__55"
+
+
+
+    # $ANTLR start "T__56"
+    def mT__56(self, ):
+        try:
+            _type = T__56
+            _channel = DEFAULT_CHANNEL
+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:16:7: ( 'delete' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:16:9: 'delete'
+            pass 
+            self.match("delete")
+
+
+
+
+            self._state.type = _type
+            self._state.channel = _channel
+        finally:
+            pass
+
+    # $ANTLR end "T__56"
+
+
+
+    # $ANTLR start "T__57"
+    def mT__57(self, ):
+        try:
+            _type = T__57
+            _channel = DEFAULT_CHANNEL
+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:17:7: ( 'execute' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:17:9: 'execute'
+            pass 
+            self.match("execute")
+
+
+
+
+            self._state.type = _type
+            self._state.channel = _channel
+        finally:
+            pass
+
+    # $ANTLR end "T__57"
+
+
+
+    # $ANTLR start "T__58"
+    def mT__58(self, ):
+        try:
+            _type = T__58
+            _channel = DEFAULT_CHANNEL
+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:18:7: ( 'insert' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:18:9: 'insert'
+            pass 
+            self.match("insert")
+
+
+
+
+            self._state.type = _type
+            self._state.channel = _channel
+        finally:
+            pass
+
+    # $ANTLR end "T__58"
+
+
+
     # $ANTLR start "NEGATION"
     def mNEGATION(self, ):
         try:
             _type = NEGATION
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:89:5: ( 'not' | 'NOT' | '!' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:167:5: ( 'not' | 'NOT' | '!' )
             alt1 = 3
             LA1 = self.input.LA(1)
             if LA1 == 110:
@@ -346,21 +419,21 @@ class CongressLexer(Lexer):
 
 
             if alt1 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:89:7: 'not'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:167:7: 'not'
                 pass 
                 self.match("not")
 
 
 
             elif alt1 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:90:7: 'NOT'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:168:7: 'NOT'
                 pass 
                 self.match("NOT")
 
 
 
             elif alt1 == 3:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:91:7: '!'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:169:7: '!'
                 pass 
                 self.match(33)
 
@@ -380,8 +453,8 @@ class CongressLexer(Lexer):
             _type = EQUAL
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:137:5: ( '=' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:137:8: '='
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:173:5: ( '=' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:173:8: '='
             pass 
             self.match(61)
 
@@ -402,8 +475,8 @@ class CongressLexer(Lexer):
             _type = SIGN
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:141:5: ( '+' | '-' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:177:5: ( '+' | '-' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if self.input.LA(1) == 43 or self.input.LA(1) == 45:
                 self.input.consume()
@@ -431,7 +504,7 @@ class CongressLexer(Lexer):
             _type = INT
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:148:5: ( '1' .. '9' ( '0' .. '9' )* | ( '0' )+ | '0' ( 'o' | 'O' ) ( '0' .. '7' )+ | '0' ( 'x' | 'X' ) ( HEX_DIGIT )+ | '0' ( 'b' | 'B' ) ( '0' | '1' )+ )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:184:5: ( '1' .. '9' ( '0' .. '9' )* | ( '0' )+ | '0' ( 'o' | 'O' ) ( '0' .. '7' )+ | '0' ( 'x' | 'X' ) ( HEX_DIGIT )+ | '0' ( 'b' | 'B' ) ( '0' | '1' )+ )
             alt7 = 5
             LA7_0 = self.input.LA(1)
 
@@ -455,11 +528,11 @@ class CongressLexer(Lexer):
 
 
             if alt7 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:148:7: '1' .. '9' ( '0' .. '9' )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:184:7: '1' .. '9' ( '0' .. '9' )*
                 pass 
                 self.matchRange(49, 57)
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:148:16: ( '0' .. '9' )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:184:16: ( '0' .. '9' )*
                 while True: #loop2
                     alt2 = 2
                     LA2_0 = self.input.LA(1)
@@ -469,7 +542,7 @@ class CongressLexer(Lexer):
 
 
                     if alt2 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (48 <= self.input.LA(1) <= 57):
                             self.input.consume()
@@ -487,9 +560,9 @@ class CongressLexer(Lexer):
 
 
             elif alt7 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:149:7: ( '0' )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:185:7: ( '0' )+
                 pass 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:149:7: ( '0' )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:185:7: ( '0' )+
                 cnt3 = 0
                 while True: #loop3
                     alt3 = 2
@@ -500,7 +573,7 @@ class CongressLexer(Lexer):
 
 
                     if alt3 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:149:7: '0'
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:185:7: '0'
                         pass 
                         self.match(48)
 
@@ -517,7 +590,7 @@ class CongressLexer(Lexer):
 
 
             elif alt7 == 3:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:150:7: '0' ( 'o' | 'O' ) ( '0' .. '7' )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:186:7: '0' ( 'o' | 'O' ) ( '0' .. '7' )+
                 pass 
                 self.match(48)
 
@@ -530,7 +603,7 @@ class CongressLexer(Lexer):
 
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:150:23: ( '0' .. '7' )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:186:23: ( '0' .. '7' )+
                 cnt4 = 0
                 while True: #loop4
                     alt4 = 2
@@ -541,7 +614,7 @@ class CongressLexer(Lexer):
 
 
                     if alt4 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (48 <= self.input.LA(1) <= 55):
                             self.input.consume()
@@ -565,7 +638,7 @@ class CongressLexer(Lexer):
 
 
             elif alt7 == 4:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:151:7: '0' ( 'x' | 'X' ) ( HEX_DIGIT )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:187:7: '0' ( 'x' | 'X' ) ( HEX_DIGIT )+
                 pass 
                 self.match(48)
 
@@ -578,7 +651,7 @@ class CongressLexer(Lexer):
 
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:151:23: ( HEX_DIGIT )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:187:23: ( HEX_DIGIT )+
                 cnt5 = 0
                 while True: #loop5
                     alt5 = 2
@@ -589,7 +662,7 @@ class CongressLexer(Lexer):
 
 
                     if alt5 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (48 <= self.input.LA(1) <= 57) or (65 <= self.input.LA(1) <= 70) or (97 <= self.input.LA(1) <= 102):
                             self.input.consume()
@@ -613,7 +686,7 @@ class CongressLexer(Lexer):
 
 
             elif alt7 == 5:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:152:7: '0' ( 'b' | 'B' ) ( '0' | '1' )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:188:7: '0' ( 'b' | 'B' ) ( '0' | '1' )+
                 pass 
                 self.match(48)
 
@@ -626,7 +699,7 @@ class CongressLexer(Lexer):
 
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:152:23: ( '0' | '1' )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:188:23: ( '0' | '1' )+
                 cnt6 = 0
                 while True: #loop6
                     alt6 = 2
@@ -637,7 +710,7 @@ class CongressLexer(Lexer):
 
 
                     if alt6 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (48 <= self.input.LA(1) <= 49):
                             self.input.consume()
@@ -675,18 +748,18 @@ class CongressLexer(Lexer):
             _type = FLOAT
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:158:5: ( FLOAT_NO_EXP | FLOAT_EXP )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:194:5: ( FLOAT_NO_EXP | FLOAT_EXP )
             alt8 = 2
             alt8 = self.dfa8.predict(self.input)
             if alt8 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:158:7: FLOAT_NO_EXP
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:194:7: FLOAT_NO_EXP
                 pass 
                 self.mFLOAT_NO_EXP()
 
 
 
             elif alt8 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:159:7: FLOAT_EXP
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:195:7: FLOAT_EXP
                 pass 
                 self.mFLOAT_EXP()
 
@@ -707,7 +780,7 @@ class CongressLexer(Lexer):
             _type = STRING
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:182:5: ( ( STRPREFIX )? ( SLSTRING )+ | ( BYTESTRPREFIX ) ( SLBYTESTRING )+ )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:218:5: ( ( STRPREFIX )? ( SLSTRING )+ | ( BYTESTRPREFIX ) ( SLBYTESTRING )+ )
             alt12 = 2
             LA12 = self.input.LA(1)
             if LA12 == 114:
@@ -747,16 +820,16 @@ class CongressLexer(Lexer):
 
 
             if alt12 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:182:7: ( STRPREFIX )? ( SLSTRING )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:218:7: ( STRPREFIX )? ( SLSTRING )+
                 pass 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:182:7: ( STRPREFIX )?
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:218:7: ( STRPREFIX )?
                 alt9 = 2
                 LA9_0 = self.input.LA(1)
 
                 if (LA9_0 == 82 or LA9_0 == 85 or LA9_0 == 114 or LA9_0 == 117) :
                     alt9 = 1
                 if alt9 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                     pass 
                     if self.input.LA(1) == 82 or self.input.LA(1) == 85 or self.input.LA(1) == 114 or self.input.LA(1) == 117:
                         self.input.consume()
@@ -770,7 +843,7 @@ class CongressLexer(Lexer):
 
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:182:20: ( SLSTRING )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:218:20: ( SLSTRING )+
                 cnt10 = 0
                 while True: #loop10
                     alt10 = 2
@@ -781,7 +854,7 @@ class CongressLexer(Lexer):
 
 
                     if alt10 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:182:21: SLSTRING
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:218:21: SLSTRING
                         pass 
                         self.mSLSTRING()
 
@@ -799,10 +872,10 @@ class CongressLexer(Lexer):
 
 
             elif alt12 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:183:7: ( BYTESTRPREFIX ) ( SLBYTESTRING )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:219:7: ( BYTESTRPREFIX ) ( SLBYTESTRING )+
                 pass 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:183:7: ( BYTESTRPREFIX )
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:183:8: BYTESTRPREFIX
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:219:7: ( BYTESTRPREFIX )
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:219:8: BYTESTRPREFIX
                 pass 
                 self.mBYTESTRPREFIX()
 
@@ -810,7 +883,7 @@ class CongressLexer(Lexer):
 
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:183:23: ( SLBYTESTRING )+
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:219:23: ( SLBYTESTRING )+
                 cnt11 = 0
                 while True: #loop11
                     alt11 = 2
@@ -821,7 +894,7 @@ class CongressLexer(Lexer):
 
 
                     if alt11 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:183:24: SLBYTESTRING
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:219:24: SLBYTESTRING
                         pass 
                         self.mSLBYTESTRING()
 
@@ -853,8 +926,8 @@ class CongressLexer(Lexer):
             _type = ID
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:189:5: ( ( 'a' .. 'z' | 'A' .. 'Z' | '_' | '.' ) ( 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' )* )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:189:7: ( 'a' .. 'z' | 'A' .. 'Z' | '_' | '.' ) ( 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' )*
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:225:5: ( ( 'a' .. 'z' | 'A' .. 'Z' | '_' | '.' ) ( 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' )* )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:225:7: ( 'a' .. 'z' | 'A' .. 'Z' | '_' | '.' ) ( 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' )*
             pass 
             if self.input.LA(1) == 46 or (65 <= self.input.LA(1) <= 90) or self.input.LA(1) == 95 or (97 <= self.input.LA(1) <= 122):
                 self.input.consume()
@@ -865,7 +938,7 @@ class CongressLexer(Lexer):
 
 
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:189:35: ( 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' )*
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:225:35: ( 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' )*
             while True: #loop13
                 alt13 = 2
                 LA13_0 = self.input.LA(1)
@@ -875,7 +948,7 @@ class CongressLexer(Lexer):
 
 
                 if alt13 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                     pass 
                     if self.input.LA(1) == 46 or (48 <= self.input.LA(1) <= 57) or (65 <= self.input.LA(1) <= 90) or self.input.LA(1) == 95 or (97 <= self.input.LA(1) <= 122):
                         self.input.consume()
@@ -908,7 +981,7 @@ class CongressLexer(Lexer):
             _type = COMMENT
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:194:5: ( '//' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n' | '/*' ( options {greedy=false; } : . )* '*/' | '#' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:230:5: ( '//' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n' | '/*' ( options {greedy=false; } : . )* '*/' | '#' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n' )
             alt19 = 3
             LA19_0 = self.input.LA(1)
 
@@ -934,12 +1007,12 @@ class CongressLexer(Lexer):
 
 
             if alt19 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:194:7: '//' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:230:7: '//' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n'
                 pass 
                 self.match("//")
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:194:12: (~ ( '\\n' | '\\r' ) )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:230:12: (~ ( '\\n' | '\\r' ) )*
                 while True: #loop14
                     alt14 = 2
                     LA14_0 = self.input.LA(1)
@@ -949,7 +1022,7 @@ class CongressLexer(Lexer):
 
 
                     if alt14 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (0 <= self.input.LA(1) <= 9) or (11 <= self.input.LA(1) <= 12) or (14 <= self.input.LA(1) <= 65535):
                             self.input.consume()
@@ -965,14 +1038,14 @@ class CongressLexer(Lexer):
                         break #loop14
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:194:26: ( '\\r' )?
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:230:26: ( '\\r' )?
                 alt15 = 2
                 LA15_0 = self.input.LA(1)
 
                 if (LA15_0 == 13) :
                     alt15 = 1
                 if alt15 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:194:26: '\\r'
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:230:26: '\\r'
                     pass 
                     self.match(13)
 
@@ -988,12 +1061,12 @@ class CongressLexer(Lexer):
 
 
             elif alt19 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:195:7: '/*' ( options {greedy=false; } : . )* '*/'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:231:7: '/*' ( options {greedy=false; } : . )* '*/'
                 pass 
                 self.match("/*")
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:195:12: ( options {greedy=false; } : . )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:231:12: ( options {greedy=false; } : . )*
                 while True: #loop16
                     alt16 = 2
                     LA16_0 = self.input.LA(1)
@@ -1012,7 +1085,7 @@ class CongressLexer(Lexer):
 
 
                     if alt16 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:195:40: .
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:231:40: .
                         pass 
                         self.matchAny()
 
@@ -1031,11 +1104,11 @@ class CongressLexer(Lexer):
 
 
             elif alt19 == 3:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:196:7: '#' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:232:7: '#' (~ ( '\\n' | '\\r' ) )* ( '\\r' )? '\\n'
                 pass 
                 self.match(35)
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:196:11: (~ ( '\\n' | '\\r' ) )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:232:11: (~ ( '\\n' | '\\r' ) )*
                 while True: #loop17
                     alt17 = 2
                     LA17_0 = self.input.LA(1)
@@ -1045,7 +1118,7 @@ class CongressLexer(Lexer):
 
 
                     if alt17 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (0 <= self.input.LA(1) <= 9) or (11 <= self.input.LA(1) <= 12) or (14 <= self.input.LA(1) <= 65535):
                             self.input.consume()
@@ -1061,14 +1134,14 @@ class CongressLexer(Lexer):
                         break #loop17
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:196:25: ( '\\r' )?
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:232:25: ( '\\r' )?
                 alt18 = 2
                 LA18_0 = self.input.LA(1)
 
                 if (LA18_0 == 13) :
                     alt18 = 1
                 if alt18 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:196:25: '\\r'
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:232:25: '\\r'
                     pass 
                     self.match(13)
 
@@ -1098,8 +1171,8 @@ class CongressLexer(Lexer):
             _type = WS
             _channel = DEFAULT_CHANNEL
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:200:5: ( ( ' ' | '\\t' | '\\r' | '\\n' ) )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:200:7: ( ' ' | '\\t' | '\\r' | '\\n' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:236:5: ( ( ' ' | '\\t' | '\\r' | '\\n' ) )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:236:7: ( ' ' | '\\t' | '\\r' | '\\n' )
             pass 
             if (9 <= self.input.LA(1) <= 10) or self.input.LA(1) == 13 or self.input.LA(1) == 32:
                 self.input.consume()
@@ -1129,8 +1202,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "EXPONENT"
     def mEXPONENT(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:214:5: ( ( 'e' | 'E' ) ( '+' | '-' )? ( '0' .. '9' )+ )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:214:7: ( 'e' | 'E' ) ( '+' | '-' )? ( '0' .. '9' )+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:250:5: ( ( 'e' | 'E' ) ( '+' | '-' )? ( '0' .. '9' )+ )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:250:7: ( 'e' | 'E' ) ( '+' | '-' )? ( '0' .. '9' )+
             pass 
             if self.input.LA(1) == 69 or self.input.LA(1) == 101:
                 self.input.consume()
@@ -1141,14 +1214,14 @@ class CongressLexer(Lexer):
 
 
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:214:17: ( '+' | '-' )?
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:250:17: ( '+' | '-' )?
             alt20 = 2
             LA20_0 = self.input.LA(1)
 
             if (LA20_0 == 43 or LA20_0 == 45) :
                 alt20 = 1
             if alt20 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                 pass 
                 if self.input.LA(1) == 43 or self.input.LA(1) == 45:
                     self.input.consume()
@@ -1162,7 +1235,7 @@ class CongressLexer(Lexer):
 
 
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:214:28: ( '0' .. '9' )+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:250:28: ( '0' .. '9' )+
             cnt21 = 0
             while True: #loop21
                 alt21 = 2
@@ -1173,7 +1246,7 @@ class CongressLexer(Lexer):
 
 
                 if alt21 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                     pass 
                     if (48 <= self.input.LA(1) <= 57):
                         self.input.consume()
@@ -1208,8 +1281,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "HEX_DIGIT"
     def mHEX_DIGIT(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:219:5: ( ( '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' ) )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:255:5: ( ( '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' ) )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if (48 <= self.input.LA(1) <= 57) or (65 <= self.input.LA(1) <= 70) or (97 <= self.input.LA(1) <= 102):
                 self.input.consume()
@@ -1233,8 +1306,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "DIGIT"
     def mDIGIT(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:224:5: ( ( '0' .. '9' ) )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:260:5: ( ( '0' .. '9' ) )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if (48 <= self.input.LA(1) <= 57):
                 self.input.consume()
@@ -1258,20 +1331,20 @@ class CongressLexer(Lexer):
     # $ANTLR start "FLOAT_NO_EXP"
     def mFLOAT_NO_EXP(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:229:5: ( ( INT_PART )? FRAC_PART | INT_PART '.' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:265:5: ( ( INT_PART )? FRAC_PART | INT_PART '.' )
             alt23 = 2
             alt23 = self.dfa23.predict(self.input)
             if alt23 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:229:7: ( INT_PART )? FRAC_PART
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:265:7: ( INT_PART )? FRAC_PART
                 pass 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:229:7: ( INT_PART )?
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:265:7: ( INT_PART )?
                 alt22 = 2
                 LA22_0 = self.input.LA(1)
 
                 if ((48 <= LA22_0 <= 57)) :
                     alt22 = 1
                 if alt22 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:229:7: INT_PART
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:265:7: INT_PART
                     pass 
                     self.mINT_PART()
 
@@ -1284,7 +1357,7 @@ class CongressLexer(Lexer):
 
 
             elif alt23 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:230:7: INT_PART '.'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:266:7: INT_PART '.'
                 pass 
                 self.mINT_PART()
 
@@ -1303,21 +1376,21 @@ class CongressLexer(Lexer):
     # $ANTLR start "FLOAT_EXP"
     def mFLOAT_EXP(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:235:5: ( ( INT_PART | FLOAT_NO_EXP ) EXPONENT )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:235:7: ( INT_PART | FLOAT_NO_EXP ) EXPONENT
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:271:5: ( ( INT_PART | FLOAT_NO_EXP ) EXPONENT )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:271:7: ( INT_PART | FLOAT_NO_EXP ) EXPONENT
             pass 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:235:7: ( INT_PART | FLOAT_NO_EXP )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:271:7: ( INT_PART | FLOAT_NO_EXP )
             alt24 = 2
             alt24 = self.dfa24.predict(self.input)
             if alt24 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:235:9: INT_PART
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:271:9: INT_PART
                 pass 
                 self.mINT_PART()
 
 
 
             elif alt24 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:235:20: FLOAT_NO_EXP
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:271:20: FLOAT_NO_EXP
                 pass 
                 self.mFLOAT_NO_EXP()
 
@@ -1341,10 +1414,10 @@ class CongressLexer(Lexer):
     # $ANTLR start "INT_PART"
     def mINT_PART(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:240:5: ( ( DIGIT )+ )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:240:7: ( DIGIT )+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:276:5: ( ( DIGIT )+ )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:276:7: ( DIGIT )+
             pass 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:240:7: ( DIGIT )+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:276:7: ( DIGIT )+
             cnt25 = 0
             while True: #loop25
                 alt25 = 2
@@ -1355,7 +1428,7 @@ class CongressLexer(Lexer):
 
 
                 if alt25 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                     pass 
                     if (48 <= self.input.LA(1) <= 57):
                         self.input.consume()
@@ -1390,12 +1463,12 @@ class CongressLexer(Lexer):
     # $ANTLR start "FRAC_PART"
     def mFRAC_PART(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:245:5: ( '.' ( DIGIT )+ )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:245:7: '.' ( DIGIT )+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:281:5: ( '.' ( DIGIT )+ )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:281:7: '.' ( DIGIT )+
             pass 
             self.match(46)
 
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:245:11: ( DIGIT )+
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:281:11: ( DIGIT )+
             cnt26 = 0
             while True: #loop26
                 alt26 = 2
@@ -1406,7 +1479,7 @@ class CongressLexer(Lexer):
 
 
                 if alt26 == 1:
-                    # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                    # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                     pass 
                     if (48 <= self.input.LA(1) <= 57):
                         self.input.consume()
@@ -1441,8 +1514,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "STRPREFIX"
     def mSTRPREFIX(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:253:5: ( 'r' | 'R' | 'u' | 'U' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:289:5: ( 'r' | 'R' | 'u' | 'U' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if self.input.LA(1) == 82 or self.input.LA(1) == 85 or self.input.LA(1) == 114 or self.input.LA(1) == 117:
                 self.input.consume()
@@ -1466,8 +1539,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "STRING_ESC"
     def mSTRING_ESC(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:258:5: ( '\\\\' . )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:258:7: '\\\\' .
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:294:5: ( '\\\\' . )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:294:7: '\\\\' .
             pass 
             self.match(92)
 
@@ -1486,7 +1559,7 @@ class CongressLexer(Lexer):
     # $ANTLR start "SLSTRING"
     def mSLSTRING(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:265:5: ( '\\'' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\\'' ) )* '\\'' | '\"' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\"' ) )* '\"' | '\\'\\'\\'' ( STRING_ESC |~ ( '\\\\' ) )* '\\'\\'\\'' | '\"\"\"' ( STRING_ESC |~ ( '\\\\' ) )* '\"\"\"' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:301:5: ( '\\'' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\\'' ) )* '\\'' | '\"' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\"' ) )* '\"' | '\\'\\'\\'' ( STRING_ESC |~ ( '\\\\' ) )* '\\'\\'\\'' | '\"\"\"' ( STRING_ESC |~ ( '\\\\' ) )* '\"\"\"' )
             alt31 = 4
             LA31_0 = self.input.LA(1)
 
@@ -1535,11 +1608,11 @@ class CongressLexer(Lexer):
 
 
             if alt31 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:265:7: '\\'' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\\'' ) )* '\\''
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:301:7: '\\'' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\\'' ) )* '\\''
                 pass 
                 self.match(39)
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:265:12: ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\\'' ) )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:301:12: ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\\'' ) )*
                 while True: #loop27
                     alt27 = 3
                     LA27_0 = self.input.LA(1)
@@ -1551,14 +1624,14 @@ class CongressLexer(Lexer):
 
 
                     if alt27 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:265:13: STRING_ESC
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:301:13: STRING_ESC
                         pass 
                         self.mSTRING_ESC()
 
 
 
                     elif alt27 == 2:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:265:26: ~ ( '\\\\' | '\\r' | '\\n' | '\\'' )
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:301:26: ~ ( '\\\\' | '\\r' | '\\n' | '\\'' )
                         pass 
                         if (0 <= self.input.LA(1) <= 9) or (11 <= self.input.LA(1) <= 12) or (14 <= self.input.LA(1) <= 38) or (40 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 65535):
                             self.input.consume()
@@ -1578,11 +1651,11 @@ class CongressLexer(Lexer):
 
 
             elif alt31 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:266:7: '\"' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\"' ) )* '\"'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:302:7: '\"' ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\"' ) )* '\"'
                 pass 
                 self.match(34)
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:266:11: ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\"' ) )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:302:11: ( STRING_ESC |~ ( '\\\\' | '\\r' | '\\n' | '\"' ) )*
                 while True: #loop28
                     alt28 = 3
                     LA28_0 = self.input.LA(1)
@@ -1594,14 +1667,14 @@ class CongressLexer(Lexer):
 
 
                     if alt28 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:266:12: STRING_ESC
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:302:12: STRING_ESC
                         pass 
                         self.mSTRING_ESC()
 
 
 
                     elif alt28 == 2:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:266:25: ~ ( '\\\\' | '\\r' | '\\n' | '\"' )
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:302:25: ~ ( '\\\\' | '\\r' | '\\n' | '\"' )
                         pass 
                         if (0 <= self.input.LA(1) <= 9) or (11 <= self.input.LA(1) <= 12) or (14 <= self.input.LA(1) <= 33) or (35 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 65535):
                             self.input.consume()
@@ -1621,12 +1694,12 @@ class CongressLexer(Lexer):
 
 
             elif alt31 == 3:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:267:7: '\\'\\'\\'' ( STRING_ESC |~ ( '\\\\' ) )* '\\'\\'\\''
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:303:7: '\\'\\'\\'' ( STRING_ESC |~ ( '\\\\' ) )* '\\'\\'\\''
                 pass 
                 self.match("'''")
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:267:16: ( STRING_ESC |~ ( '\\\\' ) )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:303:16: ( STRING_ESC |~ ( '\\\\' ) )*
                 while True: #loop29
                     alt29 = 3
                     LA29_0 = self.input.LA(1)
@@ -1659,14 +1732,14 @@ class CongressLexer(Lexer):
 
 
                     if alt29 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:267:17: STRING_ESC
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:303:17: STRING_ESC
                         pass 
                         self.mSTRING_ESC()
 
 
 
                     elif alt29 == 2:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:267:30: ~ ( '\\\\' )
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:303:30: ~ ( '\\\\' )
                         pass 
                         if (0 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 65535):
                             self.input.consume()
@@ -1687,12 +1760,12 @@ class CongressLexer(Lexer):
 
 
             elif alt31 == 4:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:268:7: '\"\"\"' ( STRING_ESC |~ ( '\\\\' ) )* '\"\"\"'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:304:7: '\"\"\"' ( STRING_ESC |~ ( '\\\\' ) )* '\"\"\"'
                 pass 
                 self.match("\"\"\"")
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:268:13: ( STRING_ESC |~ ( '\\\\' ) )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:304:13: ( STRING_ESC |~ ( '\\\\' ) )*
                 while True: #loop30
                     alt30 = 3
                     LA30_0 = self.input.LA(1)
@@ -1725,14 +1798,14 @@ class CongressLexer(Lexer):
 
 
                     if alt30 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:268:14: STRING_ESC
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:304:14: STRING_ESC
                         pass 
                         self.mSTRING_ESC()
 
 
 
                     elif alt30 == 2:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:268:27: ~ ( '\\\\' )
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:304:27: ~ ( '\\\\' )
                         pass 
                         if (0 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 65535):
                             self.input.consume()
@@ -1763,7 +1836,7 @@ class CongressLexer(Lexer):
     # $ANTLR start "BYTESTRPREFIX"
     def mBYTESTRPREFIX(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:5: ( 'b' | 'B' | 'br' | 'Br' | 'bR' | 'BR' | 'rb' | 'rB' | 'Rb' | 'RB' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:5: ( 'b' | 'B' | 'br' | 'Br' | 'bR' | 'BR' | 'rb' | 'rB' | 'Rb' | 'RB' )
             alt32 = 10
             LA32 = self.input.LA(1)
             if LA32 == 98:
@@ -1817,68 +1890,68 @@ class CongressLexer(Lexer):
 
 
             if alt32 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:7: 'b'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:7: 'b'
                 pass 
                 self.match(98)
 
 
             elif alt32 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:13: 'B'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:13: 'B'
                 pass 
                 self.match(66)
 
 
             elif alt32 == 3:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:19: 'br'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:19: 'br'
                 pass 
                 self.match("br")
 
 
 
             elif alt32 == 4:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:26: 'Br'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:26: 'Br'
                 pass 
                 self.match("Br")
 
 
 
             elif alt32 == 5:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:33: 'bR'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:33: 'bR'
                 pass 
                 self.match("bR")
 
 
 
             elif alt32 == 6:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:40: 'BR'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:40: 'BR'
                 pass 
                 self.match("BR")
 
 
 
             elif alt32 == 7:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:47: 'rb'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:47: 'rb'
                 pass 
                 self.match("rb")
 
 
 
             elif alt32 == 8:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:54: 'rB'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:54: 'rB'
                 pass 
                 self.match("rB")
 
 
 
             elif alt32 == 9:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:61: 'Rb'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:61: 'Rb'
                 pass 
                 self.match("Rb")
 
 
 
             elif alt32 == 10:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:279:68: 'RB'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:315:68: 'RB'
                 pass 
                 self.match("RB")
 
@@ -1895,7 +1968,7 @@ class CongressLexer(Lexer):
     # $ANTLR start "SLBYTESTRING"
     def mSLBYTESTRING(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:284:5: ( '\\'' ( BYTES_CHAR_SQ | BYTES_ESC )* '\\'' | '\"' ( BYTES_CHAR_DQ | BYTES_ESC )* '\"' | '\\'\\'\\'' ( BYTES_CHAR_SQ | BYTES_TESC )* '\\'\\'\\'' | '\"\"\"' ( BYTES_CHAR_DQ | BYTES_TESC )* '\"\"\"' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:320:5: ( '\\'' ( BYTES_CHAR_SQ | BYTES_ESC )* '\\'' | '\"' ( BYTES_CHAR_DQ | BYTES_ESC )* '\"' | '\\'\\'\\'' ( BYTES_CHAR_SQ | BYTES_TESC )* '\\'\\'\\'' | '\"\"\"' ( BYTES_CHAR_DQ | BYTES_TESC )* '\"\"\"' )
             alt37 = 4
             LA37_0 = self.input.LA(1)
 
@@ -1944,11 +2017,11 @@ class CongressLexer(Lexer):
 
 
             if alt37 == 1:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:284:7: '\\'' ( BYTES_CHAR_SQ | BYTES_ESC )* '\\''
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:320:7: '\\'' ( BYTES_CHAR_SQ | BYTES_ESC )* '\\''
                 pass 
                 self.match(39)
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:284:12: ( BYTES_CHAR_SQ | BYTES_ESC )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:320:12: ( BYTES_CHAR_SQ | BYTES_ESC )*
                 while True: #loop33
                     alt33 = 3
                     LA33_0 = self.input.LA(1)
@@ -1960,14 +2033,14 @@ class CongressLexer(Lexer):
 
 
                     if alt33 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:284:13: BYTES_CHAR_SQ
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:320:13: BYTES_CHAR_SQ
                         pass 
                         self.mBYTES_CHAR_SQ()
 
 
 
                     elif alt33 == 2:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:284:29: BYTES_ESC
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:320:29: BYTES_ESC
                         pass 
                         self.mBYTES_ESC()
 
@@ -1981,11 +2054,11 @@ class CongressLexer(Lexer):
 
 
             elif alt37 == 2:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:285:7: '\"' ( BYTES_CHAR_DQ | BYTES_ESC )* '\"'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:321:7: '\"' ( BYTES_CHAR_DQ | BYTES_ESC )* '\"'
                 pass 
                 self.match(34)
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:285:11: ( BYTES_CHAR_DQ | BYTES_ESC )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:321:11: ( BYTES_CHAR_DQ | BYTES_ESC )*
                 while True: #loop34
                     alt34 = 3
                     LA34_0 = self.input.LA(1)
@@ -1997,14 +2070,14 @@ class CongressLexer(Lexer):
 
 
                     if alt34 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:285:12: BYTES_CHAR_DQ
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:321:12: BYTES_CHAR_DQ
                         pass 
                         self.mBYTES_CHAR_DQ()
 
 
 
                     elif alt34 == 2:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:285:28: BYTES_ESC
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:321:28: BYTES_ESC
                         pass 
                         self.mBYTES_ESC()
 
@@ -2018,12 +2091,12 @@ class CongressLexer(Lexer):
 
 
             elif alt37 == 3:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:286:7: '\\'\\'\\'' ( BYTES_CHAR_SQ | BYTES_TESC )* '\\'\\'\\''
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:322:7: '\\'\\'\\'' ( BYTES_CHAR_SQ | BYTES_TESC )* '\\'\\'\\''
                 pass 
                 self.match("'''")
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:286:16: ( BYTES_CHAR_SQ | BYTES_TESC )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:322:16: ( BYTES_CHAR_SQ | BYTES_TESC )*
                 while True: #loop35
                     alt35 = 2
                     LA35_0 = self.input.LA(1)
@@ -2054,7 +2127,7 @@ class CongressLexer(Lexer):
 
 
                     if alt35 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (0 <= self.input.LA(1) <= 91) or (14 <= self.input.LA(1) <= 38) or (40 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 127):
                             self.input.consume()
@@ -2075,12 +2148,12 @@ class CongressLexer(Lexer):
 
 
             elif alt37 == 4:
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:287:7: '\"\"\"' ( BYTES_CHAR_DQ | BYTES_TESC )* '\"\"\"'
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:323:7: '\"\"\"' ( BYTES_CHAR_DQ | BYTES_TESC )* '\"\"\"'
                 pass 
                 self.match("\"\"\"")
 
 
-                # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:287:13: ( BYTES_CHAR_DQ | BYTES_TESC )*
+                # /Users/tim/opencode/congress/congress/datalog/Congress.g:323:13: ( BYTES_CHAR_DQ | BYTES_TESC )*
                 while True: #loop36
                     alt36 = 2
                     LA36_0 = self.input.LA(1)
@@ -2111,7 +2184,7 @@ class CongressLexer(Lexer):
 
 
                     if alt36 == 1:
-                        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+                        # /Users/tim/opencode/congress/congress/datalog/Congress.g:
                         pass 
                         if (0 <= self.input.LA(1) <= 91) or (14 <= self.input.LA(1) <= 33) or (35 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 127):
                             self.input.consume()
@@ -2142,8 +2215,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "BYTES_CHAR_SQ"
     def mBYTES_CHAR_SQ(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:292:5: ( '\\u0000' .. '\\u0009' | '\\u000B' .. '\\u000C' | '\\u000E' .. '\\u0026' | '\\u0028' .. '\\u005B' | '\\u005D' .. '\\u007F' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:328:5: ( '\\u0000' .. '\\u0009' | '\\u000B' .. '\\u000C' | '\\u000E' .. '\\u0026' | '\\u0028' .. '\\u005B' | '\\u005D' .. '\\u007F' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if (0 <= self.input.LA(1) <= 9) or (11 <= self.input.LA(1) <= 12) or (14 <= self.input.LA(1) <= 38) or (40 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 127):
                 self.input.consume()
@@ -2167,8 +2240,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "BYTES_CHAR_DQ"
     def mBYTES_CHAR_DQ(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:301:5: ( '\\u0000' .. '\\u0009' | '\\u000B' .. '\\u000C' | '\\u000E' .. '\\u0021' | '\\u0023' .. '\\u005B' | '\\u005D' .. '\\u007F' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:337:5: ( '\\u0000' .. '\\u0009' | '\\u000B' .. '\\u000C' | '\\u000E' .. '\\u0021' | '\\u0023' .. '\\u005B' | '\\u005D' .. '\\u007F' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if (0 <= self.input.LA(1) <= 9) or (11 <= self.input.LA(1) <= 12) or (14 <= self.input.LA(1) <= 33) or (35 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 127):
                 self.input.consume()
@@ -2192,8 +2265,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "BYTES_ESC"
     def mBYTES_ESC(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:310:5: ( '\\\\' '\\u0000' .. '\\u007F' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:310:7: '\\\\' '\\u0000' .. '\\u007F'
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:346:5: ( '\\\\' '\\u0000' .. '\\u007F' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:346:7: '\\\\' '\\u0000' .. '\\u007F'
             pass 
             self.match(92)
 
@@ -2212,8 +2285,8 @@ class CongressLexer(Lexer):
     # $ANTLR start "BYTES_TESC"
     def mBYTES_TESC(self, ):
         try:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:316:5: ( '\\u0000' .. '\\u005B' | '\\u005D' .. '\\u007F' )
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:352:5: ( '\\u0000' .. '\\u005B' | '\\u005D' .. '\\u007F' )
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:
             pass 
             if (0 <= self.input.LA(1) <= 91) or (93 <= self.input.LA(1) <= 127):
                 self.input.consume()
@@ -2235,130 +2308,151 @@ class CongressLexer(Lexer):
 
 
     def mTokens(self):
-        # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:8: ( COLONMINUS | COMMA | LBRACKET | LPAREN | RBRACKET | RPAREN | T__52 | T__53 | T__54 | NEGATION | EQUAL | SIGN | INT | FLOAT | STRING | ID | COMMENT | WS )
-        alt38 = 18
+        # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:8: ( COLONMINUS | COMMA | LBRACKET | LPAREN | RBRACKET | RPAREN | T__53 | T__54 | T__55 | T__56 | T__57 | T__58 | NEGATION | EQUAL | SIGN | INT | FLOAT | STRING | ID | COMMENT | WS )
+        alt38 = 21
         alt38 = self.dfa38.predict(self.input)
         if alt38 == 1:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:10: COLONMINUS
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:10: COLONMINUS
             pass 
             self.mCOLONMINUS()
 
 
 
         elif alt38 == 2:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:21: COMMA
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:21: COMMA
             pass 
             self.mCOMMA()
 
 
 
         elif alt38 == 3:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:27: LBRACKET
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:27: LBRACKET
             pass 
             self.mLBRACKET()
 
 
 
         elif alt38 == 4:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:36: LPAREN
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:36: LPAREN
             pass 
             self.mLPAREN()
 
 
 
         elif alt38 == 5:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:43: RBRACKET
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:43: RBRACKET
             pass 
             self.mRBRACKET()
 
 
 
         elif alt38 == 6:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:52: RPAREN
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:52: RPAREN
             pass 
             self.mRPAREN()
 
 
 
         elif alt38 == 7:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:59: T__52
-            pass 
-            self.mT__52()
-
-
-
-        elif alt38 == 8:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:65: T__53
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:59: T__53
             pass 
             self.mT__53()
 
 
 
-        elif alt38 == 9:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:71: T__54
+        elif alt38 == 8:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:65: T__54
             pass 
             self.mT__54()
 
 
 
+        elif alt38 == 9:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:71: T__55
+            pass 
+            self.mT__55()
+
+
+
         elif alt38 == 10:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:77: NEGATION
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:77: T__56
+            pass 
+            self.mT__56()
+
+
+
+        elif alt38 == 11:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:83: T__57
+            pass 
+            self.mT__57()
+
+
+
+        elif alt38 == 12:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:89: T__58
+            pass 
+            self.mT__58()
+
+
+
+        elif alt38 == 13:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:95: NEGATION
             pass 
             self.mNEGATION()
 
 
 
-        elif alt38 == 11:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:86: EQUAL
+        elif alt38 == 14:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:104: EQUAL
             pass 
             self.mEQUAL()
 
 
 
-        elif alt38 == 12:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:92: SIGN
+        elif alt38 == 15:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:110: SIGN
             pass 
             self.mSIGN()
 
 
 
-        elif alt38 == 13:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:97: INT
+        elif alt38 == 16:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:115: INT
             pass 
             self.mINT()
 
 
 
-        elif alt38 == 14:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:101: FLOAT
+        elif alt38 == 17:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:119: FLOAT
             pass 
             self.mFLOAT()
 
 
 
-        elif alt38 == 15:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:107: STRING
+        elif alt38 == 18:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:125: STRING
             pass 
             self.mSTRING()
 
 
 
-        elif alt38 == 16:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:114: ID
+        elif alt38 == 19:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:132: ID
             pass 
             self.mID()
 
 
 
-        elif alt38 == 17:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:117: COMMENT
+        elif alt38 == 20:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:135: COMMENT
             pass 
             self.mCOMMENT()
 
 
 
-        elif alt38 == 18:
-            # /Users/thinrichs/Code/congress/congress/datalog/Congress.g:1:125: WS
+        elif alt38 == 21:
+            # /Users/tim/opencode/congress/congress/datalog/Congress.g:1:143: WS
             pass 
             self.mWS()
 
@@ -2496,94 +2590,123 @@ class CongressLexer(Lexer):
     # lookup tables for DFA #38
 
     DFA38_eot = DFA.unpack(
-        u"\1\uffff\1\32\5\uffff\1\33\1\uffff\2\26\3\uffff\2\40\1\26\1\uffff"
-        u"\4\26\6\uffff\1\41\2\26\1\40\2\uffff\1\40\11\26\2\13\1\41"
+        u"\1\uffff\1\35\5\uffff\1\36\1\uffff\5\31\3\uffff\2\46\1\31\1\uffff"
+        u"\4\31\6\uffff\1\47\5\31\1\46\2\uffff\1\46\14\31\2\16\1\47\6\31"
+        u"\1\101\1\31\1\103\1\uffff\1\104\2\uffff"
         )
 
     DFA38_eof = DFA.unpack(
-        u"\57\uffff"
+        u"\105\uffff"
         )
 
     DFA38_min = DFA.unpack(
-        u"\1\11\1\55\5\uffff\1\56\1\uffff\1\157\1\117\3\uffff\2\56\1\42\1"
-        u"\uffff\4\42\6\uffff\1\56\1\164\1\124\1\56\2\uffff\1\56\10\42\1"
-        u"\53\3\56"
+        u"\1\11\1\55\5\uffff\1\56\1\uffff\1\145\1\170\1\156\1\157\1\117\3"
+        u"\uffff\2\56\1\42\1\uffff\4\42\6\uffff\1\56\1\154\1\145\1\163\1"
+        u"\164\1\124\1\56\2\uffff\1\56\10\42\1\53\1\145\1\143\1\145\3\56"
+        u"\1\164\1\165\1\162\1\145\2\164\1\56\1\145\1\56\1\uffff\1\56\2\uffff"
         )
 
     DFA38_max = DFA.unpack(
-        u"\1\172\1\55\5\uffff\1\172\1\uffff\1\157\1\117\3\uffff\2\145\1\142"
-        u"\1\uffff\2\162\1\142\1\47\6\uffff\1\172\1\164\1\124\1\145\2\uffff"
-        u"\1\145\10\47\1\71\3\172"
+        u"\1\172\1\55\5\uffff\1\172\1\uffff\1\145\1\170\1\156\1\157\1\117"
+        u"\3\uffff\2\145\1\142\1\uffff\2\162\1\142\1\47\6\uffff\1\172\1\154"
+        u"\1\145\1\163\1\164\1\124\1\145\2\uffff\1\145\10\47\1\71\1\145\1"
+        u"\143\1\145\3\172\1\164\1\165\1\162\1\145\2\164\1\172\1\145\1\172"
+        u"\1\uffff\1\172\2\uffff"
         )
 
     DFA38_accept = DFA.unpack(
-        u"\2\uffff\1\2\1\3\1\4\1\5\1\6\1\uffff\1\11\2\uffff\1\12\1\13\1\14"
-        u"\3\uffff\1\17\4\uffff\1\20\1\21\1\22\1\1\1\10\1\7\4\uffff\1\15"
-        u"\1\16\15\uffff"
+        u"\2\uffff\1\2\1\3\1\4\1\5\1\6\1\uffff\1\11\5\uffff\1\15\1\16\1\17"
+        u"\3\uffff\1\22\4\uffff\1\23\1\24\1\25\1\1\1\10\1\7\7\uffff\1\20"
+        u"\1\21\31\uffff\1\12\1\uffff\1\14\1\13"
         )
 
     DFA38_special = DFA.unpack(
-        u"\57\uffff"
+        u"\105\uffff"
         )
 
 
     DFA38_transition = [
-        DFA.unpack(u"\2\30\2\uffff\1\30\22\uffff\1\30\1\13\1\21\1\27\3\uffff"
-        u"\1\21\1\4\1\6\1\uffff\1\15\1\2\1\15\1\7\1\27\1\17\11\16\1\1\1\10"
-        u"\1\uffff\1\14\3\uffff\1\26\1\23\13\26\1\12\3\26\1\24\2\26\1\25"
-        u"\5\26\1\3\1\uffff\1\5\1\uffff\1\26\1\uffff\1\26\1\22\13\26\1\11"
-        u"\3\26\1\20\2\26\1\25\5\26"),
-        DFA.unpack(u"\1\31"),
+        DFA.unpack(u"\2\33\2\uffff\1\33\22\uffff\1\33\1\16\1\24\1\32\3\uffff"
+        u"\1\24\1\4\1\6\1\uffff\1\20\1\2\1\20\1\7\1\32\1\22\11\21\1\1\1\10"
+        u"\1\uffff\1\17\3\uffff\1\31\1\26\13\31\1\15\3\31\1\27\2\31\1\30"
+        u"\5\31\1\3\1\uffff\1\5\1\uffff\1\31\1\uffff\1\31\1\25\1\31\1\11"
+        u"\1\12\3\31\1\13\4\31\1\14\3\31\1\23\2\31\1\30\5\31"),
+        DFA.unpack(u"\1\34"),
         DFA.unpack(u""),
         DFA.unpack(u""),
         DFA.unpack(u""),
         DFA.unpack(u""),
         DFA.unpack(u""),
-        DFA.unpack(u"\1\26\1\uffff\12\34\7\uffff\32\26\4\uffff\1\26\1\uffff"
-        u"\32\26"),
+        DFA.unpack(u"\1\31\1\uffff\12\37\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
         DFA.unpack(u""),
-        DFA.unpack(u"\1\35"),
-        DFA.unpack(u"\1\36"),
-        DFA.unpack(u""),
-        DFA.unpack(u""),
-        DFA.unpack(u""),
-        DFA.unpack(u"\1\41\1\uffff\12\37\13\uffff\1\41\37\uffff\1\41"),
-        DFA.unpack(u"\1\41\1\uffff\1\42\11\41\13\uffff\1\41\37\uffff\1\41"),
-        DFA.unpack(u"\1\21\4\uffff\1\21\32\uffff\1\44\37\uffff\1\43"),
-        DFA.unpack(u""),
-        DFA.unpack(u"\1\21\4\uffff\1\21\52\uffff\1\46\37\uffff\1\45"),
-        DFA.unpack(u"\1\21\4\uffff\1\21\52\uffff\1\50\37\uffff\1\47"),
-        DFA.unpack(u"\1\21\4\uffff\1\21\32\uffff\1\52\37\uffff\1\51"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
+        DFA.unpack(u"\1\40"),
+        DFA.unpack(u"\1\41"),
+        DFA.unpack(u"\1\42"),
+        DFA.unpack(u"\1\43"),
+        DFA.unpack(u"\1\44"),
         DFA.unpack(u""),
         DFA.unpack(u""),
         DFA.unpack(u""),
+        DFA.unpack(u"\1\47\1\uffff\12\45\13\uffff\1\47\37\uffff\1\47"),
+        DFA.unpack(u"\1\47\1\uffff\1\50\11\47\13\uffff\1\47\37\uffff\1\47"),
+        DFA.unpack(u"\1\24\4\uffff\1\24\32\uffff\1\52\37\uffff\1\51"),
+        DFA.unpack(u""),
+        DFA.unpack(u"\1\24\4\uffff\1\24\52\uffff\1\54\37\uffff\1\53"),
+        DFA.unpack(u"\1\24\4\uffff\1\24\52\uffff\1\56\37\uffff\1\55"),
+        DFA.unpack(u"\1\24\4\uffff\1\24\32\uffff\1\60\37\uffff\1\57"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
         DFA.unpack(u""),
         DFA.unpack(u""),
         DFA.unpack(u""),
-        DFA.unpack(u"\1\26\1\uffff\12\34\7\uffff\4\26\1\53\25\26\4\uffff"
-        u"\1\26\1\uffff\4\26\1\53\25\26"),
-        DFA.unpack(u"\1\54"),
-        DFA.unpack(u"\1\55"),
-        DFA.unpack(u"\1\41\1\uffff\12\37\13\uffff\1\41\37\uffff\1\41"),
         DFA.unpack(u""),
         DFA.unpack(u""),
-        DFA.unpack(u"\1\41\1\uffff\1\42\11\41\13\uffff\1\41\37\uffff\1\41"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\21\4\uffff\1\21"),
-        DFA.unpack(u"\1\41\1\uffff\1\41\2\uffff\12\56"),
-        DFA.unpack(u"\1\26\1\uffff\12\26\7\uffff\32\26\4\uffff\1\26\1\uffff"
-        u"\32\26"),
-        DFA.unpack(u"\1\26\1\uffff\12\26\7\uffff\32\26\4\uffff\1\26\1\uffff"
-        u"\32\26"),
-        DFA.unpack(u"\1\26\1\uffff\12\56\7\uffff\32\26\4\uffff\1\26\1\uffff"
-        u"\32\26")
+        DFA.unpack(u""),
+        DFA.unpack(u"\1\31\1\uffff\12\37\7\uffff\4\31\1\61\25\31\4\uffff"
+        u"\1\31\1\uffff\4\31\1\61\25\31"),
+        DFA.unpack(u"\1\62"),
+        DFA.unpack(u"\1\63"),
+        DFA.unpack(u"\1\64"),
+        DFA.unpack(u"\1\65"),
+        DFA.unpack(u"\1\66"),
+        DFA.unpack(u"\1\47\1\uffff\12\45\13\uffff\1\47\37\uffff\1\47"),
+        DFA.unpack(u""),
+        DFA.unpack(u""),
+        DFA.unpack(u"\1\47\1\uffff\1\50\11\47\13\uffff\1\47\37\uffff\1\47"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\24\4\uffff\1\24"),
+        DFA.unpack(u"\1\47\1\uffff\1\47\2\uffff\12\67"),
+        DFA.unpack(u"\1\70"),
+        DFA.unpack(u"\1\71"),
+        DFA.unpack(u"\1\72"),
+        DFA.unpack(u"\1\31\1\uffff\12\31\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
+        DFA.unpack(u"\1\31\1\uffff\12\31\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
+        DFA.unpack(u"\1\31\1\uffff\12\67\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
+        DFA.unpack(u"\1\73"),
+        DFA.unpack(u"\1\74"),
+        DFA.unpack(u"\1\75"),
+        DFA.unpack(u"\1\76"),
+        DFA.unpack(u"\1\77"),
+        DFA.unpack(u"\1\100"),
+        DFA.unpack(u"\1\31\1\uffff\12\31\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
+        DFA.unpack(u"\1\102"),
+        DFA.unpack(u"\1\31\1\uffff\12\31\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
+        DFA.unpack(u""),
+        DFA.unpack(u"\1\31\1\uffff\12\31\7\uffff\32\31\4\uffff\1\31\1\uffff"
+        u"\32\31"),
+        DFA.unpack(u""),
+        DFA.unpack(u"")
     ]
 
     # class definition for DFA #38

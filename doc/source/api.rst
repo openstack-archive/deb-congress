@@ -21,7 +21,7 @@ There are two top-level concepts in today's API: Policies and Data-sources.
 
 
 1. Policy (/v1/)
-=================
+================
 
 You can create and delete policies.  Two policies are provided by
 the system, and you are not permitted to delete them: *classification*
@@ -51,15 +51,18 @@ more details and examples::
 
     POST .../policies/<policy-id>
       ?action=simulate
-      &query=<query>                   # string query like: 'error(x)'
-      &sequence=<sequence>             # changes to state like: 'p+(1) p-(2)'
-      &action_policy=<action_policy>   # name of a policy: 'action'
       [&delta=true]                    # return just change in <query>
       [&trace=true]                    # also return explanation of result
 
+    Request Body
+    {
+      "query" : "<query>",                 # string query like: 'error(x)'
+      "sequence": "<sequence>",            # changes to state like: 'p+(1) p-(2)'
+      "action_policy" : "<action_policy>"  # name of a policy: 'action'
+    }
 
 2. Policy Rules (/v1/policies/<policy-id>/...)
-===============================================
+==============================================
 
 Each policy is a collection of rules.  Congress supports the usual CRUD
 operations for changing that collection.  A rule has the following fields:
@@ -79,7 +82,7 @@ DELETE  .../rules/<rule-id>     Delete policy rule
 
 
 3. Policy Tables (/v1/policies/<policy-id>/...)
-===================================================
+===============================================
 
 All the tables mentioned in the rules of a policy can be queried
 via the API.  They have only an ID field.
@@ -93,7 +96,7 @@ GET     .../tables/<table-id>      Read table properties
 
 
 4. Policy Table Rows (/v1/policies/<policy-id>/tables/<table-id>/...)
-========================================================================
+=====================================================================
 
 Rules are used to instruct Congress how to create new tables from existing
 tables.  Congress allows you to query the actual contents of tables
@@ -109,34 +112,39 @@ GET     .../rows?trace=true    List rows with explanation (use 'printf' to displ
 ======= ====================== =====================================================
 
 
-5. Drivers (/v1/system/)
-==========================
-A driver is a piece of code that once instantiated and configured interacts with
-a specific cloud service like Nova or Neutron.  A driver has the following fields.
+5. DEPRECATED: Drivers (/v1/system/)
+====================================
+A driver is a piece of code that once instantiated and configured interacts
+with a specific cloud service like Nova or Neutron.  A driver has the following
+fields.
 
 * ID: a human-friendly unique identifier
-* description: an explanation of which type of cloud service this driver interacts with
+* description: an explanation of which type of cloud service this driver
+  interacts with
 
-======= ======================== =====================================================
+======= ======================== ==============================================
 Op      URL                      Result
-======= ======================== =====================================================
+======= ======================== ==============================================
 GET     .../drivers              List drivers
 GET     .../drivers/<driver-id>  Read driver properties
-======= ======================== =====================================================
+======= ======================== ==============================================
 
+Drivers are deprecated as of liberty.  The upcoming distributed architecture
+replaces API-level datasource management with configuration-level datasource
+management.
 
 
 6. Data sources (/v1/)
-========================
+======================
 
-A data source is an instantiated and configured driver that interacts with a particular
-instance of a cloud service (like Nova or Neutron).  You can construct multiple datasources using
-the same driver.  For example, if you have two instances of Neutron running, one
-in production and one in test and you want to write policy over both of them,
-you would create two datasources using the Neutron driver and give them different
-names and configuration options.  For example, you might call one datasource
-'neutron_prod' and the other 'neutron_test' and configure them with different IP
-addresses.
+A data source is an instantiated and configured driver that interacts with a
+particular instance of a cloud service (like Nova or Neutron).  You can
+construct multiple datasources using the same driver.  For example, if you have
+two instances of Neutron running, one in production and one in test and you
+want to write policy over both of them, you would create two datasources using
+the Neutron driver and give them different names and configuration options. For
+example, you might call one datasource 'neutron_prod' and the other
+'neutron_test' and configure them with different IP addresses.
 
 A datasource has the following fields.
 
@@ -152,16 +160,21 @@ A datasource has the following fields.
 Op      URL                              Result
 ======= ================================ ======================================
 GET     .../data-sources                 List data sources
-POST    .../data-sources                 Create data source
-DELETE  .../data-sources/<ds-id>         Delete data source
+POST    .../data-sources                 Create data source  DEPRECATED
+DELETE  .../data-sources/<ds-id>         Delete data source  DEPRECATED
 GET     .../data-sources/<ds-id>/schema  Show schema (tables and table-columns)
 GET     .../data-sources/<ds-id>/status  Show data source status
+GET     .../data-sources/<ds-id>/actions List supported data source actions
 ======= ================================ ======================================
+
+Datasource creation and deletion via the API are deprecated as of liberty.  The
+upcoming distributed architecture replaces API-level datasource management with
+configuration-level datasource management.
 
 
 
 7. Data source Tables (/v1/data-sources/<ds-id>/...)
-========================================================
+====================================================
 
 Each data source maintains a collection of tables (very similar to a Policy).
 The list of available tables for each data source is available via the API.
@@ -172,12 +185,13 @@ Op      URL                        Result
 ======= ========================== =========================================
 GET     .../tables                 List data sources
 GET     .../tables/<table-id>      Read data source properties
+GET     .../tables/<table-id>/spec Show a table schema
 ======= ========================== =========================================
 
 
 
 8. Data source Table Rows (/v1/data-sources/<ds-id>/tables/<table-id>/...)
-============================================================================
+==========================================================================
 
 The contents of each data source table (the rows of each table) can be queried
 via the API as well.  A row has just a Data field, which is a list of values.
@@ -190,6 +204,17 @@ GET     .../rows                   List rows
 
 
 
+9. Versions (/)
+===============
+
+You can see the supported API versions.
+
+======= ========================== =================================
+Op      URL                        Result
+======= ========================== =================================
+GET     .../                       List supported versions
+GET     .../<version-id>           Read version
+======= ========================== =================================
 
 
 

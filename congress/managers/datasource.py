@@ -15,17 +15,19 @@
 
 import json
 
-from oslo.config import cfg
-from oslo.db import exception as db_exc
-from oslo.utils import importutils
+from oslo_config import cfg
+from oslo_db import exception as db_exc
+from oslo_log import log as logging
+from oslo_utils import importutils
+from oslo_utils import uuidutils
+import six
 
 from congress.datasources import constants
 from congress.db import api as db
 from congress.db import datasources as datasources_db
 from congress.dse import d6cage
 from congress import exception
-from congress.openstack.common import log as logging
-from congress.openstack.common import uuidutils
+
 
 LOG = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ class DataSourceManager(object):
                 except KeyError:
                     # FIXME(arosen): we need a better exception then
                     # key error being raised here
-                    raise DatasourceNameInUse(name=req['name'])
+                    raise DatasourceNameInUse(value=req['name'])
                 try:
                     cage.createservice(name=req['name'],
                                        moduleName=driver_info['module'],
@@ -77,10 +79,10 @@ class DataSourceManager(object):
                     engine.set_schema(req['name'], service.get_schema())
                 except Exception:
                     engine.delete_policy(req['name'])
-                    raise DatasourceCreationError(name=req['name'])
+                    raise DatasourceCreationError(value=req['name'])
 
         except db_exc.DBDuplicateEntry:
-            raise DatasourceNameInUse(name=req['name'])
+            raise DatasourceNameInUse(value=req['name'])
         new_item = dict(item)
         new_item['id'] = new_id
         return cls.make_datasource_dict(new_item)
@@ -109,7 +111,7 @@ class DataSourceManager(object):
                   'enabled': req.get('enabled', True)}
         # NOTE(arosen): we store the config as a string in the db so
         # here we serialize it back when returning it.
-        if type(req.get('config')) in [str, unicode]:
+        if isinstance(req.get('config'), six.string_types):
             result['config'] = json.loads(req['config'])
         else:
             result['config'] = req.get('config')
@@ -135,9 +137,13 @@ class DataSourceManager(object):
         for datasouce_driver in datasources_db.get_datasources():
             result = cls.make_datasource_dict(datasouce_driver)
             if filter_secret:
-                hide_fields = cls.get_driver_info(result['driver'])['secret']
-                for hide_field in hide_fields:
-                    result['config'][hide_field] = "<hidden>"
+                # secret field may be not provided while creating datasource
+                try:
+                    hides = cls.get_driver_info(result['driver'])['secret']
+                    for hide_field in hides:
+                        result['config'][hide_field] = "<hidden>"
+                except KeyError:
+                    pass
             results.append(result)
         return results
 
@@ -216,7 +222,7 @@ class DataSourceManager(object):
 
                 # check that all the required options are passed in
                 required_options = set(
-                    [k for k, v in loaded_driver['config'].iteritems()
+                    [k for k, v in loaded_driver['config'].items()
                      if v == constants.REQUIRED])
                 missing_options = required_options - specified_options
                 if missing_options:
@@ -236,6 +242,13 @@ class DataSourceManager(object):
                 for x in schema[tablename]]
         return {'table_id': tablename,
                 'columns': cols}
+
+    @classmethod
+    def request_refresh(cls, datasource_id):
+        datasource = cls.get_datasource(datasource_id)
+        cage = d6cage.d6Cage()
+        datasource = cage.service_object(datasource['name'])
+        datasource.request_refresh()
 
 
 class BadConfig(exception.BadRequest):
@@ -259,7 +272,7 @@ class InvalidDriverOption(BadConfig):
 
 
 class DatasourceNameInUse(exception.Conflict):
-    msg_fmt = _("Datasource already in use with name %(name)s")
+    msg_fmt = _("Datasource already in use with name %(value)s")
 
 
 class DatasourceNotFound(exception.NotFound):
@@ -271,4 +284,4 @@ class DriverNotFound(exception.NotFound):
 
 
 class DatasourceCreationError(BadConfig):
-    msg_fmt = _("Datasource could not be created on the DSE: %(name)")
+    msg_fmt = _("Datasource could not be created on the DSE: %(value)s")

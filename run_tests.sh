@@ -162,12 +162,11 @@ function copy_subunit_log {
 
 function run_pep8 {
   echo "Running flake8 ..."
-
   ${wrapper} flake8
 }
 
 
-TESTRTESTS="python -m congress.openstack.common.lockutils python setup.py testr"
+TESTRTESTS="lockutils-wrapper python setup.py testr"
 
 if [ $never_venv -eq 0 ]
 then

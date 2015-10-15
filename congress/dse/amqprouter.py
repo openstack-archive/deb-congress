@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pprint
+import six
 
 
 class Node():
     def __init__(self, rPath=[], results=set()):
-        self.pp = pprint.PrettyPrinter(indent=1)
-
         self.destinations = set()
 
         self.results = results
@@ -69,8 +67,6 @@ class Node():
 
         else:
             self.children[word]._add(patternList[1:], destination)
-
-        # logging.info("***CHILDREN: %s" % (self.pp.pformat(self.children)))
 
     def update_results(self):
         if '#' in self.children:
@@ -129,7 +125,7 @@ class routeTable(Node):
             for p in pattern:
                 wordList = p.split('.')
                 self._add(wordList, destination)
-        elif type(pattern) == str or type(pattern) == unicode:
+        elif isinstance(pattern, six.string_types):
             wordList = pattern.split('.')
             self._add(wordList, destination)
 
@@ -138,7 +134,7 @@ class routeTable(Node):
             for p in pattern:
                 wordList = p.split('.')
                 self._remove(wordList, destination)
-        elif type(pattern) == str or type(pattern) == unicode:
+        elif isinstance(pattern, six.string_types):
             wordList = pattern.split('.')
             self._remove(wordList, destination)
 

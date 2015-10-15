@@ -12,16 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# FIXME(arosen): we should just import off of datasource_driver below
-# rather than also importing DataSourceDriver directly.
+import copy
+import hashlib
+import json
+
+import eventlet
+import mock
+
 from congress.datasources import datasource_driver
+from congress.datasources import datasource_utils
 from congress import exception
 from congress.tests import base
 from congress.tests.datasources import util
 from congress.tests import helper
-
-import hashlib
-import json
 
 
 class TestDatasourceDriver(base.TestCase):
@@ -415,6 +418,23 @@ class TestDatasourceDriver(base.TestCase):
         self.assertTrue(('testtable', ('a', 'FOO')) in rows)
         self.assertTrue(('testtable', ('b', 123)) in rows)
 
+    def test_convert_vdict_with_id_function(self):
+        # Test a single VDICT with an id column that is a function.
+        resp = {'a': 'FOO', 'b': 123}
+        translator = {'translation-type': 'VDICT', 'table-name': 'testtable',
+                      'id-col': lambda obj: 'id:' + obj['a'],
+                      'key-col': 'key', 'val-col': 'value',
+                      'translator': self.val_trans}
+        rows, k = datasource_driver.DataSourceDriver.convert_obj(resp,
+                                                                 translator)
+
+        k1 = 'id:FOO'
+
+        self.assertEqual(2, len(rows))
+        self.assertEqual(k1, k)
+        self.assertTrue(('testtable', (k, 'a', 'FOO')) in rows)
+        self.assertTrue(('testtable', (k, 'b', 123)) in rows)
+
     def test_convert_vdict_list(self):
         # Test a VDICT that contains lists.
         resp = {'foo': (1, 2, 3), 'bar': ('a', 'b')}
@@ -462,6 +482,24 @@ class TestDatasourceDriver(base.TestCase):
                                                                  translator)
 
         k1 = self.compute_hash((1, 'a', 'b', 'True'))
+
+        self.assertEqual(4, len(rows))
+        self.assertEqual(k1, k)
+        self.assertTrue(('testtable', (k, 1)) in rows)
+        self.assertTrue(('testtable', (k, 'a')) in rows)
+        self.assertTrue(('testtable', (k, 'b')) in rows)
+        self.assertTrue(('testtable', (k, 'True')) in rows)
+
+    def test_convert_list_with_id_function(self):
+        # Test a single LIST with an id function
+        resp = (1, 'a', 'b', True)
+        translator = {'translation-type': 'LIST', 'table-name': 'testtable',
+                      'id-col': lambda obj: obj[0], 'val-col': 'value',
+                      'translator': self.val_trans}
+        rows, k = datasource_driver.DataSourceDriver.convert_obj(resp,
+                                                                 translator)
+
+        k1 = 1
 
         self.assertEqual(4, len(rows))
         self.assertEqual(k1, k)
@@ -1125,6 +1163,28 @@ class TestDatasourceDriver(base.TestCase):
         self.assertTrue(schema['testtable'] == ('id_col', 'unique_key'))
         self.assertTrue(schema['subtable'] == ('parent_key', 'val'))
 
+    def test_get_schema_with_hdict_id_function(self):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            translator = {
+                'translation-type': 'HDICT',
+                'table-name': 'testtable',
+                'id-col': lambda obj: obj,
+                'selector-type': 'DICT_SELECTOR',
+                'field-translators': ({'fieldname': 'field1',
+                                       'translator': self.val_trans},
+                                      {'fieldname': 'field2',
+                                       'translator': self.val_trans})}
+
+            TRANSLATORS = [translator]
+
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+
+        schema = TestDriver().get_schema()
+
+        self.assertEqual(1, len(schema))
+        self.assertTrue(schema['testtable'] == ('id-col', 'field1', 'field2'))
+
     def test_get_schema_with_vdict_parent(self):
         class TestDriver(datasource_driver.DataSourceDriver):
             subtranslator = {'translation-type': 'LIST',
@@ -1150,6 +1210,249 @@ class TestDatasourceDriver(base.TestCase):
         self.assertTrue(schema['testtable'] == ('id_col', 'key'))
         self.assertTrue(schema['subtable'] == ('parent_key', 'val'))
 
+    def test_update_state_on_changed(self):
+        mocked_self = mock.MagicMock()
+        mocked_self.raw_state = dict()
+        resource = 'fake_resource'
+
+        @datasource_utils.update_state_on_changed(resource)
+        def _translate_raw_data(_self, raw_data):
+            return mock.sentinel.translated_data
+
+        result = _translate_raw_data(mocked_self, mock.sentinel.raw_data)
+
+        self.assertEqual(mock.sentinel.translated_data, result)
+        self.assertEqual(mock.sentinel.raw_data,
+                         mocked_self.raw_state[resource])
+        mocked_self._update_state.assert_called_once_with(
+            resource, mock.sentinel.translated_data)
+
+        # raw data is not changed, don't translate anything.
+        result = _translate_raw_data(mocked_self, mock.sentinel.raw_data)
+
+        self.assertEqual([], result)
+        self.assertEqual(mock.sentinel.raw_data,
+                         mocked_self.raw_state[resource])
+        mocked_self._update_state.assert_called_once_with(
+            resource, mock.sentinel.translated_data)
+
+    def test_update_state_on_changed_with_changed_raw_data(self):
+        mocked_self = mock.MagicMock()
+        mocked_self.raw_state = dict()
+        resource = 'fake_resource'
+        mocked_self.raw_state[resource] = mock.sentinel.last_data
+
+        @datasource_utils.update_state_on_changed(resource)
+        def _translate_raw_data(_self, raw_data):
+            return mock.sentinel.translated_data
+
+        result = _translate_raw_data(mocked_self, mock.sentinel.new_data)
+
+        self.assertEqual(mock.sentinel.translated_data, result)
+        self.assertEqual(mock.sentinel.new_data,
+                         mocked_self.raw_state[resource])
+        mocked_self._update_state.assert_called_once_with(
+            resource, mock.sentinel.translated_data)
+
+    def test_update_state_on_changed_with_empty_raw_data(self):
+        mocked_self = mock.MagicMock()
+        mocked_self.raw_state = dict()
+        resource = 'fake_resource'
+        mocked_self.raw_state[resource] = mock.sentinel.last_data
+
+        @datasource_utils.update_state_on_changed(resource)
+        def _translate_raw_data(_self, raw_data):
+            return []
+
+        result = _translate_raw_data(mocked_self, [])
+
+        self.assertEqual([], result)
+        self.assertEqual([], mocked_self.raw_state[resource])
+        mocked_self._update_state.assert_called_once_with(resource, [])
+
+    # The test case should be removed, once oslo-incubator bug/1499369 is
+    # resolved.
+    def test_update_state_on_changed_with_wrong_eq(self):
+        class EqObject(object):
+            def __eq__(self, other):
+                return True
+
+        mocked_self = mock.MagicMock()
+        mocked_self.raw_state = dict()
+        resource = 'fake_resource'
+        cached_data = EqObject()
+        mocked_self.raw_state[resource] = [cached_data]
+
+        @datasource_utils.update_state_on_changed(resource)
+        def _translate_raw_data(_self, raw_data):
+            return []
+
+        new_data = EqObject()
+        _translate_raw_data(mocked_self, [new_data])
+        mocked_self._update_state.assert_called_once_with(resource, [])
+        self.assertIs(new_data, mocked_self.raw_state[resource][0])
+
+    def test_update_state(self):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+
+        test_driver = TestDriver()
+        test_driver.state = {'fake_table': set(), 'foo_table': set(),
+                             'unchanged_table': {mock.sentinel.data}}
+        test_driver._table_deps = {'fake_table': ['fake_table', 'foo_table'],
+                                   'unchanged_table': ['unchanged_table']}
+
+        row_data = [('fake_table', mock.sentinel.data1),
+                    ('fake_table', mock.sentinel.data2),
+                    ('foo_table', mock.sentinel.data3)]
+        expected_state = {'fake_table': {mock.sentinel.data1,
+                                         mock.sentinel.data2},
+                          'foo_table': {mock.sentinel.data3},
+                          'unchanged_table': {mock.sentinel.data}}
+
+        test_driver._update_state('fake_table', row_data)
+
+        self.assertEqual(expected_state, test_driver.state)
+
+    def test_update_state_with_undefined_table(self):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+
+        test_driver = TestDriver()
+        test_driver.state = {'fake_table': set(), 'foo_table': set()}
+        test_driver._table_deps = {'fake_table': ['fake_table', 'foo_table']}
+
+        row_data = [('fake_table', mock.sentinel.data1),
+                    ('foo_table', mock.sentinel.data2),
+                    ('undefined_table', mock.sentinel.data3)]
+        expected_state = {'fake_table': {mock.sentinel.data1},
+                          'foo_table': {mock.sentinel.data2}}
+
+        test_driver._update_state('fake_table', row_data)
+
+        self.assertEqual(expected_state, test_driver.state)
+
+    def test_update_state_with_none_row_data(self):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+
+        test_driver = TestDriver()
+        test_driver.state = {'fake_table': {mock.sentinel.data1},
+                             'foo_table': {mock.sentinel.data2}}
+        test_driver._table_deps = {'fake_table': ['fake_table', 'foo_table']}
+
+        expected_state = {'fake_table': set(), 'foo_table': set()}
+        test_driver._update_state('fake_table', [])
+
+        self.assertEqual(expected_state, test_driver.state)
+
+    def test_update_state_with_part_none_row_data(self):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+
+        test_driver = TestDriver()
+        test_driver.state = {'fake_table': set(),
+                             'foo_table': {mock.sentinel.data3}}
+        test_driver._table_deps = {'fake_table': ['fake_table', 'foo_table']}
+
+        row_data = [('fake_table', mock.sentinel.data1),
+                    ('fake_table', mock.sentinel.data2)]
+        expected_state = {'fake_table': {mock.sentinel.data1,
+                                         mock.sentinel.data2},
+                          'foo_table': set()}
+
+        test_driver._update_state('fake_table', row_data)
+
+        self.assertEqual(expected_state, test_driver.state)
+
+    def test_build_table_deps(self):
+        level10_translator = {
+            'translation-type': 'HDICT',
+            'table-name': 'level10',
+            'parent-key': 'parent_key',
+            'selector-type': 'DICT_SELECTOR',
+            'in-list': True,
+            'field-translators':
+                ({'fieldname': 'level3_thing', 'translator': self.val_trans},)}
+
+        level3_translator = {
+            'translation-type': 'HDICT',
+            'table-name': 'level3',
+            'parent-key': 'parent_key',
+            'selector-type': 'DICT_SELECTOR',
+            'in-list': True,
+            'field-translators':
+                ({'fieldname': 'level3_thing', 'translator': self.val_trans},)}
+
+        level2_translator = {
+            'translation-type': 'HDICT',
+            'table-name': 'level2',
+            'parent-key': 'id',
+            'selector-type': 'DICT_SELECTOR',
+            'field-translators':
+                ({'fieldname': 'thing', 'translator': self.val_trans},
+                 {'fieldname': 'level3',
+                  'translator': level3_translator})}
+
+        level1_translator = {
+            'translation-type': 'HDICT',
+            'table-name': 'level1',
+            'selector-type': 'DICT_SELECTOR',
+            'field-translators':
+                ({'fieldname': 'id', 'translator': self.val_trans},
+                 {'fieldname': 'level2',
+                  'translator': level2_translator})}
+
+        driver = datasource_driver.DataSourceDriver('', '', None, None, None)
+        driver.register_translator(level1_translator)
+        driver.register_translator(level10_translator)
+        expected_table_deps = {'level1': ['level1', 'level2', 'level3'],
+                               'level10': ['level10']}
+        self.assertEqual(expected_table_deps, driver._table_deps)
+
+    @mock.patch.object(eventlet, 'spawn')
+    def test_init_consistence(self, mock_spawn):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+                self._init_end_start_poll()
+        test_driver = TestDriver()
+        mock_spawn.assert_called_once_with(test_driver.poll_loop,
+                                           test_driver.poll_time)
+        self.assertTrue(test_driver.initialized)
+
+    @mock.patch.object(eventlet, 'spawn')
+    def test_init_consistence_with_exception(self, mock_spawn):
+        class TestDriver(datasource_driver.DataSourceDriver):
+            def __init__(self):
+                super(TestDriver, self).__init__('', '', None, None, None)
+                self.do_something()
+                self._init_end_start_poll()
+
+            def do_something(self):
+                pass
+
+        with mock.patch.object(TestDriver, "do_something",
+                               side_effect=Exception()):
+            test_driver = None
+            try:
+                test_driver = TestDriver()
+                self.fail("Exception should be raised")
+            except Exception:
+                self.assertEqual(0, mock_spawn.call_count)
+                self.assertIsNone(test_driver)
+
+
+class TestExecutionDriver(base.TestCase):
+
+    def setUp(self):
+        super(TestExecutionDriver, self).setUp()
+        self.exec_driver = datasource_driver.ExecutionDriver()
+
     def test_get_method_nested(self):
         class server(object):
             def nested_method(self):
@@ -1161,9 +1464,10 @@ class TestDatasourceDriver(base.TestCase):
 
             def top_method(self):
                 return True
+
         nova_client = NovaClient()
-        driver = datasource_driver.ExecutionDriver()
-        method = driver._get_method(nova_client, "servers.nested_method")
+        method = self.exec_driver._get_method(nova_client,
+                                              "servers.nested_method")
         self.assertTrue(method())
 
     def test_get_method_top(self):
@@ -1172,8 +1476,7 @@ class TestDatasourceDriver(base.TestCase):
                 return True
 
         nova_client = NovaClient()
-        driver = datasource_driver.ExecutionDriver()
-        method = driver._get_method(nova_client, "top_method")
+        method = self.exec_driver._get_method(nova_client, "top_method")
         self.assertTrue(method())
 
     def test_execute_api(self):
@@ -1182,8 +1485,52 @@ class TestDatasourceDriver(base.TestCase):
                 return "arg1=%s arg2=%s arg3=%s" % (arg1, arg2, arg3)
 
         nova_client = NovaClient()
-        driver = datasource_driver.ExecutionDriver()
         arg = {"positional": ["value1", "value2"], "named": {"arg3": "value3"}}
         # it will raise exception if the method _execute_api failed to location
         # the api
-        driver._execute_api(nova_client, "action", arg)
+        self.exec_driver._execute_api(nova_client, "action", arg)
+
+    def test_get_actions_order_by_name(self):
+        mock_methods = {'funcA': mock.MagicMock(),
+                        'funcH': mock.MagicMock(),
+                        'funcF': mock.MagicMock()}
+        with mock.patch.dict(self.exec_driver.executable_methods,
+                             mock_methods):
+            action_list = self.exec_driver.get_actions().get('results')
+            expected_list = copy.deepcopy(action_list)
+            expected_list.sort(key=lambda item: item['name'])
+            self.assertEqual(expected_list, action_list)
+
+    def test_inspect_builtin_methods(self):
+        class FakeNovaClient(object):
+
+            def _internal_action(self, arg1, arg2):
+                """internal action with docs.
+
+                :param arg1: internal test arg1
+                :param arg2: internal test arg2
+                """
+                pass
+
+            def action_no_doc(self, arg1, arg2):
+                pass
+
+            def action_doc(self, arg1, arg2):
+                """action with docs.
+
+                :param arg1: test arg1
+                :param arg2: test arg2
+                """
+                pass
+
+        expected_methods = {'action_doc': [[{'desc': 'arg1: test arg1',
+                                             'name': 'arg1'},
+                                            {'desc': 'arg2: test arg2',
+                                             'name': 'arg2'}],
+                                           'action with docs. '],
+                            'action_no_doc': [[], '']}
+
+        nova_client = FakeNovaClient()
+        api_prefix = 'congress.tests.datasources.test_datasource_driver'
+        self.exec_driver.inspect_builtin_methods(nova_client, api_prefix)
+        self.assertEqual(expected_methods, self.exec_driver.executable_methods)

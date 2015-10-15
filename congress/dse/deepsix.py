@@ -16,11 +16,11 @@ import eventlet
 from eventlet import greenthread
 from eventlet import hubs
 eventlet.monkey_patch()
-from oslo.utils import strutils
+from oslo_log import log as logging
+from oslo_utils import strutils
 
 from congress.dse import d6message
 from congress.dse import dataobj
-from congress.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class deepSix(greenthread.GreenThread):
         #     self.log_debug("sending msg %s", msg)
         self.dataPath.put_nowait(msg)
 
-    def schedule(self, msg, scheduuid, interval, callback=None):
+    def schedule(self, msg, scheduuid, interval):
         if scheduuid in self.scheduuids:
 
             if msg.type == 'pub':
@@ -88,12 +88,10 @@ class deepSix(greenthread.GreenThread):
                                       self.schedule,
                                       msg,
                                       scheduuid,
-                                      interval,
-                                      callback)
+                                      interval)
             self.timerThreads.append(ev)
         else:
-            self.log_warning(
-                "scheduled a message without adding to scheduuids")
+            self.log_debug("stop scheduling a message: %s", msg)
 
     def getSubData(self, corrId, sender=""):
         if corrId in self.subdata:
@@ -226,26 +224,18 @@ class deepSix(greenthread.GreenThread):
         corruuid = msg.correlationId
         sender = msg.replyTo
 
+        if corruuid in self.scheduuids:
+            self.scheduuids.remove(corruuid)
+
         if corruuid in self.subdata:
             callback = self.subdata[corruuid].callback
 
-            if msg.type == 'pub':
+            if msg.type in ['pub', 'rep']:
                 if callback:
                     scrubbed = callback(msg)
                     if scrubbed:
                         self.subdata[corruuid].update(
                             sender, dataobj.dataObject(scrubbed))
-
-            elif msg.type == 'rep':
-                if callback:
-                    scrubbed = callback(msg)
-                    if scrubbed:
-                        self.subdata[corruuid].update(
-                            sender, dataobj.dataObject(scrubbed))
-
-#             if corruuid not in self.scheduuids:
-#                 del self.subdata[corruuid]
-
         else:
             self.unsubscribe(corrId=corruuid)
 
@@ -271,7 +261,7 @@ class deepSix(greenthread.GreenThread):
 
         if interval:
             self.scheduuids.add(corruuid)
-            self.schedule(msg, corruuid, interval, callback)
+            self.schedule(msg, corruuid, interval)
         else:
 
             self.send(msg)
@@ -527,27 +517,18 @@ class deepSix(greenthread.GreenThread):
                 self.name, msg.type, str(msg))
 
     def _loop(self):
+
+        # self.running will be set to False when processing a shutdown a
+        # message
         while self.running:
             if self.inbox:
-                # self.log("RUNning")
-                if hasattr(self, 'd6run'):
-                    # self.log("d6running")
-                    self.d6run()
-                # self.log("Checking inbox")
-                if not self.inbox.empty():
-                    # self.log("Found message")
-                    msg = self.inbox.get()
-                    self.receive(msg)
-                    self.inbox.task_done()
-
-            # Needed to switch between running services
-            eventlet.sleep()
-
-    def service_object(self, name):
-        if name in self.services:
-            return self.services[name]['object']
-        else:
-            return None
+                msg = self.inbox.get()
+                self.receive(msg)
+                self.inbox.task_done()
+            else:
+                # in test cases some deepSix instances are initialized
+                # without an inbox, this prevents a busy wait state
+                eventlet.sleep(1)
 
     def subscription_list(self):
         """Return a list version of subscriptions."""

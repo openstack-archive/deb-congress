@@ -25,13 +25,12 @@ import os
 import mock
 import mox
 import neutronclient.v2_0
+from oslo_log import log as logging
 
 from congress.api import webservice
 from congress.common import config
 from congress.datalog import compile
 from congress import harness
-from congress.openstack.common import log as logging
-from congress.policy_engines import agnostic
 from congress.tests import base
 import congress.tests.datasources.test_neutron_driver as test_neutron
 from congress.tests import helper
@@ -73,10 +72,6 @@ class TestCongress(base.SqlTestCase):
                                             'datasources/neutron_driver.py'}}
 
         cage = harness.create(helper.root_path(), config_override)
-        # Disable synchronizer because the this test creates
-        # datasources without also inserting them into the database.
-        # The synchronizer would delete these datasources.
-        cage.service_object('synchronizer').set_poll_time(0)
 
         engine = cage.service_object('engine')
 
@@ -174,7 +169,7 @@ class TestCongress(base.SqlTestCase):
         formula = test_neutron.create_network_group('p')
         LOG.debug("Sending formula: %s", formula)
         api['rule'].publish(
-            'policy-update', [agnostic.Event(formula, target=policy)])
+            'policy-update', [compile.Event(formula, target=policy)])
         # check we have the proper subscriptions
         self.assertTrue('neutron' in cage.services)
         neutron = cage.service_object('neutron')
@@ -192,7 +187,7 @@ class TestCongress(base.SqlTestCase):
         formula = test_neutron.create_network_group('p')
         LOG.debug("Sending formula: %s", formula)
         api['rule'].publish(
-            'policy-update', [agnostic.Event(formula, target=policy)])
+            'policy-update', [compile.Event(formula, target=policy)])
         helper.retry_check_nonempty_last_policy_change(engine)
         LOG.debug("All services: %s", cage.services.keys())
         neutron = cage.service_object('neutron')
@@ -210,7 +205,7 @@ class TestCongress(base.SqlTestCase):
         # Send formula
         formula = test_neutron.create_networkXnetwork_group('p')
         api['rule'].publish(
-            'policy-update', [agnostic.Event(formula, target=policy)])
+            'policy-update', [compile.Event(formula, target=policy)])
         helper.retry_check_nonempty_last_policy_change(engine)
         # poll datasources
         neutron = cage.service_object('neutron')
@@ -342,23 +337,13 @@ class TestCongress(base.SqlTestCase):
             api['rule'].add_item(
                 {'rule': 'p(x) :- q(x)'}, {}, context=context)
 
-    def test_table_api_model(self):
-        """Test the table api model."""
-        self.skipTest("Move to test/api/api_model and use fake driver...")
-        api = self.api
-        engine = self.engine
-
-        # add some rules defining tables
-        context = {'policy_id': engine.DEFAULT_THEORY}
-        api['rule'].add_item(
-            {'rule': 'p(x) :- q(x)'},
-            {}, context=context)
-        api['rule'].add_item(
-            {'rule': 'q(x) :- r(x)'},
-            {}, context=context)
-        tables = api['table'].get_items({}, context=context)['results']
-        tables = [t['id'] for t in tables]
-        self.assertEqual(set(tables), set(['p', 'q', 'r']))
+        # nonexistent policy
+        ctxt = {'policy_id': 'nonexistent'}
+        with self.assertRaisesRegexp(
+                webservice.DataModelException,
+                "policy does not exist"):
+            api['rule'].add_item(
+                {'rule': 'p(x) :- q(x)'}, {}, context=ctxt)
 
     def test_policy_api_model(self):
         """Test the policy api model."""
@@ -591,7 +576,7 @@ class TestCongress(base.SqlTestCase):
                 'action_policy': engine.ACTION_THEORY,
                 'sequence': 'q(1)'}
         check_err({}, context, helper.FakeRequest(body),
-                  'Syntax error for rule', 'Invalid query')
+                  'Parse failure', 'Invalid query')
 
         # Multiple querys
         body = {'query': 'p(x) q(x)',
@@ -624,7 +609,7 @@ class TestCongress(base.SqlTestCase):
                 'action_policy': engine.ACTION_THEORY,
                 'sequence': 'q(1'}
         check_err({}, context, helper.FakeRequest(body),
-                  'Syntax error for rule',
+                  'Parse failure',
                   'Syntactically invalid sequence')
 
         # Semantically invalid sequence
@@ -738,9 +723,9 @@ class TestCongress(base.SqlTestCase):
                 self.testkey = "arg1=%s arg2=%s arg3=%s" % (arg1, arg2, arg3)
 
         nova_client = NovaClient("testing")
-        cservices = self.cage.services
-        cservices['nova']['object']._execute_api = _execute_api
-        cservices['nova']['object'].nova_client = nova_client
+        nova = self.cage.service_object('nova')
+        nova._execute_api = _execute_api
+        nova.nova_client = nova_client
 
         api = self.api
         body = {'name': 'nova:disconnectNetwork',
@@ -752,7 +737,7 @@ class TestCongress(base.SqlTestCase):
         self.assertEqual(result, {})
 
         expected_result = "arg1=value1 arg2=value2 arg3=value3"
-        f = cservices['nova']['object'].nova_client._get_testkey
+        f = nova.nova_client._get_testkey
         helper.retry_check_function_return_value(f, expected_result)
 
     def test_rule_insert_delete(self):
@@ -932,3 +917,115 @@ class TestCongress(base.SqlTestCase):
         self.api['rule'].delete_item(
             id1, {}, context={'policy_id': 'alice'})
         self.assertEqual(len(self.engine.logger.messages), 2)
+
+    def test_datasource_request_refresh(self):
+        # Remember that neutron does not poll automatically here, which
+        #   is why this test actually testing request_refresh
+        neutron = self.cage.service_object('neutron')
+        LOG.info("neutron.state: %s", neutron.state)
+        self.assertEqual(len(neutron.state['ports']), 0)
+        # TODO(thinrichs): Seems we can't test the datasource API at all.
+        # api['datasource'].request_refresh_action(
+        #     {}, context, helper.FakeRequest({}))
+        neutron.request_refresh()
+        f = lambda: len(neutron.state['ports'])
+        helper.retry_check_function_return_value_not_eq(f, 0)
+
+    def test_neutron_policy_execute(self):
+        class NeutronClient(object):
+            def __init__(self, testkey):
+                self.testkey = testkey
+
+            def disconnectNetwork(self, arg1):
+                LOG.info("disconnectNetwork called on %s", arg1)
+                self.testkey = "arg1=%s" % arg1
+
+        neutron_client = NeutronClient(None)
+        neutron = self.cage.service_object('neutron')
+        neutron.neutron = neutron_client
+
+        # insert rule and data
+        self.api['policy'].add_item({'name': 'alice'}, {})
+        (id1, _) = self.api['rule'].add_item(
+            {'rule': 'execute[neutron:disconnectNetwork(x)] :- q(x)'}, {},
+            context={'policy_id': 'alice'})
+        self.assertEqual(len(self.engine.logger.messages), 0)
+        (id2, _) = self.api['rule'].add_item(
+            {'rule': 'q(1)'}, {}, context={'policy_id': 'alice'})
+        self.assertEqual(len(self.engine.logger.messages), 1)
+        ans = "arg1=1"
+        f = lambda: neutron.neutron.testkey
+        helper.retry_check_function_return_value(f, ans)
+
+    def test_datasource_api_model_execute(self):
+        def _execute_api(client, action, action_args):
+            positional_args = action_args.get('positional', [])
+            named_args = action_args.get('named', {})
+            method = reduce(getattr, action.split('.'), client)
+            method(*positional_args, **named_args)
+
+        class NovaClient(object):
+            def __init__(self, testkey):
+                self.testkey = testkey
+
+            def _get_testkey(self):
+                return self.testkey
+
+            def disconnect(self, arg1, arg2, arg3):
+                self.testkey = "arg1=%s arg2=%s arg3=%s" % (arg1, arg2, arg3)
+
+            def disconnect_all(self):
+                self.testkey = "action_has_no_args"
+
+        nova_client = NovaClient("testing")
+        nova = self.cage.service_object('nova')
+        nova._execute_api = _execute_api
+        nova.nova_client = nova_client
+
+        execute_action = self.api['datasource'].execute_action
+
+        # Positive test: valid body args, ds_id
+        context = {'ds_id': 'nova'}
+        body = {'name': 'disconnect',
+                'args': {'positional': ['value1', 'value2'],
+                         'named': {'arg3': 'value3'}}}
+        request = helper.FakeRequest(body)
+        result = execute_action({}, context, request)
+        self.assertEqual(result, {})
+        expected_result = "arg1=value1 arg2=value2 arg3=value3"
+        f = nova.nova_client._get_testkey
+        helper.retry_check_function_return_value(f, expected_result)
+
+        # Positive test: no body args
+        context = {'ds_id': 'nova'}
+        body = {'name': 'disconnect_all'}
+        request = helper.FakeRequest(body)
+        result = execute_action({}, context, request)
+        self.assertEqual(result, {})
+        expected_result = "action_has_no_args"
+        f = nova.nova_client._get_testkey
+        helper.retry_check_function_return_value(f, expected_result)
+
+        # Negative test: invalid ds_id
+        context = {'ds_id': 'unknown_ds'}
+        self.assertRaises(webservice.DataModelException, execute_action,
+                          {}, context, request)
+
+        # Negative test: no ds_id
+        context = {}
+        self.assertRaises(webservice.DataModelException, execute_action,
+                          {}, context, request)
+
+        # Negative test: empty body
+        context = {'ds_id': 'nova'}
+        bad_request = helper.FakeRequest({})
+        self.assertRaises(webservice.DataModelException, execute_action,
+                          {}, context, bad_request)
+
+        # Negative test: no body name/action
+        context = {'ds_id': 'nova'}
+        body = {'args': {'positional': ['value1', 'value2'],
+                         'named': {'arg3': 'value3'}}}
+        bad_request = helper.FakeRequest(body)
+        self.assertRaises(webservice.DataModelException, execute_action,
+                          {}, context, bad_request)

@@ -12,19 +12,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import DATABASE_POLICY_TYPE
+from congress.datalog import base
 from congress.datalog import compile
-from congress.datalog.compile import Event
-from congress.datalog.topdown import TopDownTheory
+from congress.datalog import topdown
 from congress.datalog import unify
-from congress.datalog.utility import iterstr
-from congress.exception import PolicyException
+from congress.datalog import utility
+from congress import exception
 
 
 ##############################################################################
 # Concrete Theory: Database
 ##############################################################################
-class Database(TopDownTheory):
+class Database(topdown.TopDownTheory):
     class Proof(object):
         def __init__(self, binding, rule):
             self.binding = binding
@@ -142,7 +141,7 @@ class Database(TopDownTheory):
         super(Database, self).__init__(
             name=name, abbr=abbr, theories=theories, schema=schema)
         self.data = {}
-        self.kind = DATABASE_POLICY_TYPE
+        self.kind = base.DATABASE_POLICY_TYPE
 
     def str2(self):
         def hash2str(h):
@@ -219,9 +218,9 @@ class Database(TopDownTheory):
             noop = True
         else:
             noop = False
-        if event.formula.table not in self.data:
+        if event.formula.table.table not in self.data:
             return not noop
-        event_data = self.data[event.formula.table]
+        event_data = self.data[event.formula.table.table]
         raw_tuple = tuple(event.formula.argument_names())
         for dbtuple in event_data:
             if dbtuple.tuple == raw_tuple:
@@ -232,21 +231,21 @@ class Database(TopDownTheory):
     def __contains__(self, formula):
         if not compile.is_atom(formula):
             return False
-        if formula.table not in self.data:
+        if formula.table.table not in self.data:
             return False
-        event_data = self.data[formula.table]
+        event_data = self.data[formula.table.table]
         raw_tuple = tuple(formula.argument_names())
         return any((dbtuple.tuple == raw_tuple for dbtuple in event_data))
 
     def explain(self, atom):
-        if atom.table not in self.data or not atom.is_ground():
+        if atom.table.table not in self.data or not atom.is_ground():
             return self.ProofCollection([])
         args = tuple([x.name for x in atom.arguments])
-        for dbtuple in self.data[atom.table]:
+        for dbtuple in self.data[atom.table.table]:
             if dbtuple.tuple == args:
                 return dbtuple.proofs
 
-    def tablenames(self, body_only=False):
+    def tablenames(self, body_only=False, include_builtin=False):
         """Return all table names occurring in this theory."""
         if body_only:
             return []
@@ -273,15 +272,17 @@ class Database(TopDownTheory):
         return dbtuple.match(atom, unifier2)
 
     def atom_to_internal(self, atom, proofs=None):
-        return atom.table, self.DBTuple(atom.argument_names(), proofs)
+        return atom.table.table, self.DBTuple(atom.argument_names(), proofs)
 
     def insert(self, atom, proofs=None):
         """Inserts ATOM into the DB.  Returns changes."""
-        return self.modify(Event(formula=atom, insert=True, proofs=proofs))
+        return self.modify(compile.Event(formula=atom, insert=True,
+                                         proofs=proofs))
 
     def delete(self, atom, proofs=None):
         """Deletes ATOM from the DB.  Returns changes."""
-        return self.modify(Event(formula=atom, insert=False, proofs=proofs))
+        return self.modify(compile.Event(formula=atom, insert=False,
+                                         proofs=proofs))
 
     def update(self, events):
         """Applies all of EVENTS to the DB.
@@ -299,11 +300,11 @@ class Database(TopDownTheory):
         Return a list of PolicyException if we were
         to apply the events EVENTS to the current policy.
         """
-        self.log(None, "update_would_cause_errors %s", iterstr(events))
+        self.log(None, "update_would_cause_errors %s", utility.iterstr(events))
         errors = []
         for event in events:
             if not compile.is_atom(event.formula):
-                errors.append(PolicyException(
+                errors.append(exception.PolicyException(
                     "Non-atomic formula is not permitted: {}".format(
                         str(event.formula))))
             else:
@@ -319,9 +320,9 @@ class Database(TopDownTheory):
         """
         assert compile.is_atom(event.formula), "Modify requires Atom"
         atom = event.formula
-        self.log(atom.table, "Modify: %s", atom)
+        self.log(atom.table.table, "Modify: %s", atom)
         if self.is_noop(event):
-            self.log(atom.table, "Event %s is a noop", event)
+            self.log(atom.table.table, "Event %s is a noop", event)
             return []
         if event.insert:
             self.insert_actual(atom, proofs=event.proofs)
@@ -339,7 +340,7 @@ class Database(TopDownTheory):
         self.log(table, "Insert: %s", atom)
         if table not in self.data:
             self.data[table] = [dbtuple]
-            self.log(atom.table, "First tuple in table %s", table)
+            self.log(atom.table.table, "First tuple in table %s", table)
             return
         else:
             for existingtuple in self.data[table]:
@@ -357,7 +358,7 @@ class Database(TopDownTheory):
         Along with the proofs that are no longer true.
         """
         assert compile.is_atom(atom), "Delete requires Atom"
-        self.log(atom.table, "Delete: %s", atom)
+        self.log(atom.table.table, "Delete: %s", atom)
         table, dbtuple = self.atom_to_internal(atom, proofs)
         if table not in self.data:
             return

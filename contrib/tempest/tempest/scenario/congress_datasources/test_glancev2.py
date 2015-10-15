@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 from oslo_log import log as logging
+from tempest_lib import decorators
 
 from tempest import clients  # noqa
 from tempest import config  # noqa
@@ -47,6 +48,7 @@ class TestGlanceV2Driver(manager_congress.ScenarioPolicyBase):
         cls.datasource_id = manager_congress.get_datasource_id(
             cls.admin_manager.congress_client, 'glancev2')
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     @test.services('image')
     def test_glancev2_images_table(self):
@@ -59,7 +61,7 @@ class TestGlanceV2Driver(manager_congress.ScenarioPolicyBase):
         def _check_data_table_glancev2_images():
             # Fetch data from glance each time, because this test may start
             # before glance has all the users.
-            images = self.glancev2.image_list()
+            images = self.glancev2.list_images()
             image_map = {}
             for image in images:
                 image_map[image['id']] = image
@@ -89,17 +91,18 @@ class TestGlanceV2Driver(manager_congress.ScenarioPolicyBase):
             return True
 
         if not test.call_until_true(func=_check_data_table_glancev2_images,
-                                    duration=20, sleep_for=4):
+                                    duration=100, sleep_for=4):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     @test.services('image')
     def test_glancev2_tags_table(self):
         def _check_data_table_glance_images():
             # Fetch data from glance each time, because this test may start
             # before glance has all the users.
-            images = self.glancev2.image_list()
+            images = self.glancev2.list_images()
             image_tag_map = {}
             for image in images:
                 image_tag_map[image['id']] = image['tags']
@@ -119,6 +122,6 @@ class TestGlanceV2Driver(manager_congress.ScenarioPolicyBase):
             return True
 
         if not test.call_until_true(func=_check_data_table_glance_images,
-                                    duration=20, sleep_for=4):
+                                    duration=100, sleep_for=5):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")

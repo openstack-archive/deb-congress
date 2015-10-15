@@ -12,20 +12,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-from congress.datalog.base import DELTA_POLICY_TYPE
-from congress.datalog.base import EventQueue
-from congress.datalog.base import MATERIALIZED_POLICY_TYPE
-from congress.datalog.base import Proof
-from congress.datalog.base import Theory
-from congress.datalog.base import Tracer
-from congress.datalog.builtin.congressbuiltin import builtin_registry
+
+from oslo_log import log as logging
+
+from congress.datalog import base
 from congress.datalog import compile
-from congress.datalog.compile import Event
-from congress.datalog.database import Database
-from congress.datalog.topdown import TopDownTheory
-from congress.datalog.utility import iterstr
-from congress.datalog.utility import OrderedSet
-from congress.openstack.common import log as logging
+from congress.datalog import database
+from congress.datalog import topdown
+from congress.datalog import utility
 
 
 LOG = logging.getLogger(__name__)
@@ -58,7 +52,7 @@ class DeltaRule(object):
             vs |= atom.variables()
         return vs
 
-    def tablenames(self, body_only=False):
+    def tablenames(self, body_only=False, include_builtin=False):
         """Return the set of tablenames occurring in this delta rule."""
         tables = set()
         if not body_only:
@@ -69,7 +63,7 @@ class DeltaRule(object):
         return tables
 
 
-class DeltaRuleTheory (Theory):
+class DeltaRuleTheory (base.Theory):
     """A collection of DeltaRules.  Not useful by itself as a policy."""
     def __init__(self, name=None, abbr=None, theories=None):
         super(DeltaRuleTheory, self).__init__(
@@ -84,7 +78,7 @@ class DeltaRuleTheory (Theory):
         self.views = {}
         # all tables
         self.all_tables = {}
-        self.kind = DELTA_POLICY_TYPE
+        self.kind = base.DELTA_POLICY_TYPE
 
     def modify(self, event):
         """Insert/delete the compile.Rule RULE into the theory.
@@ -93,7 +87,7 @@ class DeltaRuleTheory (Theory):
         a list including just RULE).
         """
         self.log(None, "DeltaRuleTheory.modify %s", event.formula)
-        self.log(None, "originals: %s", iterstr(self.originals))
+        self.log(None, "originals: %s", utility.iterstr(self.originals))
         if event.insert:
             if self.insert(event.formula):
                 return [event]
@@ -111,7 +105,7 @@ class DeltaRuleTheory (Theory):
             "DeltaRuleTheory only takes rules")
         self.log(rule.tablename(), "Insert: %s", rule)
         if rule in self.originals:
-            self.log(None, iterstr(self.originals))
+            self.log(None, utility.iterstr(self.originals))
             return False
         self.log(rule.tablename(), "Insert 2: %s", rule)
         for delta in self.compute_delta_rules([rule]):
@@ -123,10 +117,10 @@ class DeltaRuleTheory (Theory):
         """Insert a delta rule."""
         self.log(None, "Inserting delta rule %s", delta)
         # views (tables occurring in head)
-        if delta.head.table in self.views:
-            self.views[delta.head.table] += 1
+        if delta.head.table.table in self.views:
+            self.views[delta.head.table.table] += 1
         else:
-            self.views[delta.head.table] = 1
+            self.views[delta.head.table.table] = 1
 
         # tables
         for table in delta.tablenames():
@@ -138,9 +132,9 @@ class DeltaRuleTheory (Theory):
         # contents
         # TODO(thinrichs): eliminate dups, maybe including
         #     case where bodies are reorderings of each other
-        if delta.trigger.table not in self.rules:
-            self.rules[delta.trigger.table] = OrderedSet()
-        self.rules[delta.trigger.table].add(delta)
+        if delta.trigger.table.table not in self.rules:
+            self.rules[delta.trigger.table.table] = utility.OrderedSet()
+        self.rules[delta.trigger.table.table].add(delta)
 
     def delete(self, rule):
         """Delete a compile.Rule from theory.
@@ -159,10 +153,10 @@ class DeltaRuleTheory (Theory):
     def delete_delta(self, delta):
         """Delete the DeltaRule DELTA from the theory."""
         # views
-        if delta.head.table in self.views:
-            self.views[delta.head.table] -= 1
-            if self.views[delta.head.table] == 0:
-                del self.views[delta.head.table]
+        if delta.head.table.table in self.views:
+            self.views[delta.head.table.table] -= 1
+            if self.views[delta.head.table.table] == 0:
+                del self.views[delta.head.table.table]
 
         # tables
         for table in delta.tablenames():
@@ -172,16 +166,16 @@ class DeltaRuleTheory (Theory):
                     del self.all_tables[table]
 
         # contents
-        self.rules[delta.trigger.table].discard(delta)
-        if not len(self.rules[delta.trigger.table]):
-            del self.rules[delta.trigger.table]
+        self.rules[delta.trigger.table.table].discard(delta)
+        if not len(self.rules[delta.trigger.table.table]):
+            del self.rules[delta.trigger.table.table]
 
     def policy(self):
         return self.originals
 
     def get_arity_self(self, tablename):
         for p in self.originals:
-            if p.head.table == tablename:
+            if p.head.table.table == tablename:
                 return len(p.head.arguments)
         return None
 
@@ -246,8 +240,8 @@ class DeltaRuleTheory (Theory):
                     occurrences[tablearity] = 1
                 else:
                     # change name of atom
-                    atom.table = new_table_name(table, arity,
-                                                occurrences[tablearity])
+                    atom.table.table = new_table_name(table, arity,
+                                                      occurrences[tablearity])
                     # update our counters
                     occurrences[tablearity] += 1
                     if tablearity not in global_self_joins:
@@ -288,8 +282,7 @@ class DeltaRuleTheory (Theory):
                 continue
             rule = compile.reorder_for_safety(rule)
             for literal in rule.body:
-                if builtin_registry.is_builtin(literal.table,
-                                               len(literal.arguments)):
+                if literal.is_builtin():
                     continue
                 newbody = [lit for lit in rule.body if lit is not literal]
                 delta_rules.append(
@@ -297,7 +290,7 @@ class DeltaRuleTheory (Theory):
         return delta_rules
 
 
-class MaterializedViewTheory(TopDownTheory):
+class MaterializedViewTheory(topdown.TopDownTheory):
     """A theory that stores the table contents of views explicitly.
 
     Relies on included theories to define the contents of those
@@ -309,7 +302,7 @@ class MaterializedViewTheory(TopDownTheory):
         super(MaterializedViewTheory, self).__init__(
             name=name, abbr=abbr, theories=theories, schema=schema)
         # queue of events left to process
-        self.queue = EventQueue()
+        self.queue = base.EventQueue()
         # data storage
         db_name = None
         db_abbr = None
@@ -321,13 +314,13 @@ class MaterializedViewTheory(TopDownTheory):
         if abbr is not None:
             db_abbr = abbr + "DB"
             delta_abbr = abbr + "Dlta"
-        self.database = Database(name=db_name, abbr=db_abbr)
+        self.database = database.Database(name=db_name, abbr=db_abbr)
         # rules that dictate how database changes in response to events
         self.delta_rules = DeltaRuleTheory(name=delta_name, abbr=delta_abbr)
-        self.kind = MATERIALIZED_POLICY_TYPE
+        self.kind = base.MATERIALIZED_POLICY_TYPE
 
     def set_tracer(self, tracer):
-        if isinstance(tracer, Tracer):
+        if isinstance(tracer, base.Tracer):
             self.tracer = tracer
             self.database.tracer = tracer
             self.delta_rules.tracer = tracer
@@ -346,10 +339,10 @@ class MaterializedViewTheory(TopDownTheory):
     # SELECT is handled by TopDownTheory
 
     def insert(self, formula):
-        return self.update([Event(formula=formula, insert=True)])
+        return self.update([compile.Event(formula=formula, insert=True)])
 
     def delete(self, formula):
-        return self.update([Event(formula=formula, insert=False)])
+        return self.update([compile.Event(formula=formula, insert=False)])
 
     def update(self, events):
         """Apply inserts/deletes described by EVENTS and return changes.
@@ -369,7 +362,7 @@ class MaterializedViewTheory(TopDownTheory):
         Return a list of PolicyException if we were
         to apply the events EVENTS to the current policy.
         """
-        self.log(None, "update_would_cause_errors %s", iterstr(events))
+        self.log(None, "update_would_cause_errors %s", utility.iterstr(events))
         errors = []
         # compute new rule set
         for event in events:
@@ -407,17 +400,17 @@ class MaterializedViewTheory(TopDownTheory):
     # Interface implementation
 
     def explain_aux(self, query, depth):
-        self.log(query.table, "Explaining %s", query, depth=depth)
+        self.log(query.table.table, "Explaining %s", query, depth=depth)
         # Bail out on negated literals.  Need different
         #   algorithm b/c we need to introduce quantifiers.
         if query.is_negated():
-            return Proof(query, [])
+            return base.Proof(query, [])
         # grab first local proof, since they're all equally good
         localproofs = self.database.explain(query)
         if localproofs is None:
             return None
         if len(localproofs) == 0:   # base fact
-            return Proof(query, [])
+            return base.Proof(query, [])
         localproof = localproofs[0]
         rule_instance = localproof.rule.plug(localproof.binding)
         subproofs = []
@@ -426,7 +419,7 @@ class MaterializedViewTheory(TopDownTheory):
             if subproof is None:
                 return None
             subproofs.append(subproof)
-        return Proof(query, subproofs)
+        return base.Proof(query, subproofs)
 
     def modify(self, event):
         """Modifies contents of theory to insert/delete FORMULA.
@@ -437,7 +430,7 @@ class MaterializedViewTheory(TopDownTheory):
         self.enqueue_any(event)
         changes = self.process_queue()
         self.log(event.formula.tablename(),
-                 "modify returns %s", iterstr(changes))
+                 "modify returns %s", utility.iterstr(changes))
         return changes
 
     def enqueue_any(self, event):
@@ -454,7 +447,7 @@ class MaterializedViewTheory(TopDownTheory):
         formula = event.formula
         if formula.is_atom():
             self.log(formula.tablename(), "compute/enq: atom %s", formula)
-            assert not self.is_view(formula.table), (
+            assert not self.is_view(formula.table.table), (
                 "Cannot directly modify tables" +
                 " computed from other tables")
             # self.log(formula.table, "%s: %s", text, formula)
@@ -466,8 +459,8 @@ class MaterializedViewTheory(TopDownTheory):
             # need to eliminate self-joins here so that we fill all
             #   the tables introduced by self-join elimination.
             for rule in DeltaRuleTheory.eliminate_self_joins([formula]):
-                new_event = Event(formula=rule, insert=event.insert,
-                                  target=event.target)
+                new_event = compile.Event(formula=rule, insert=event.insert,
+                                          target=event.target)
                 self.enqueue(new_event)
             return []
 
@@ -493,13 +486,14 @@ class MaterializedViewTheory(TopDownTheory):
                         event.formula.variables(), event.formula.body)
                     self.log(event.formula.tablename(),
                              "new bindings after top-down: %s",
-                             iterstr(bindings))
+                             utility.iterstr(bindings))
                     self.process_new_bindings(bindings, event.formula.head,
                                               event.insert, event.formula)
             else:
                 self.propagate(event)
                 history.extend(self.database.modify(event))
-            self.log(event.tablename(), "History: %s", iterstr(history))
+            self.log(event.tablename(), "History: %s",
+                     utility.iterstr(history))
         return history
 
     def propagate(self, event):
@@ -507,11 +501,11 @@ class MaterializedViewTheory(TopDownTheory):
 
         Computes and enqueue events generated by EVENT and the DELTA_RULES.
         """
-        self.log(event.formula.table, "Processing event: %s", event)
+        self.log(event.formula.table.table, "Processing event: %s", event)
         applicable_rules = self.delta_rules.rules_with_trigger(
-            event.formula.table)
+            event.formula.table.table)
         if len(applicable_rules) == 0:
-            self.log(event.formula.table, "No applicable delta rule")
+            self.log(event.formula.table.table, "No applicable delta rule")
         for delta_rule in applicable_rules:
             self.propagate_rule(event, delta_rule)
 
@@ -520,7 +514,7 @@ class MaterializedViewTheory(TopDownTheory):
 
         Compute and enqueue new events generated by EVENT and DELTA_RULE.
         """
-        self.log(event.formula.table, "Processing event %s with rule %s",
+        self.log(event.formula.table.table, "Processing event %s with rule %s",
                  event, delta_rule)
 
         # compute tuples generated by event (either for insert or delete)
@@ -538,11 +532,11 @@ class MaterializedViewTheory(TopDownTheory):
                              event.formula, self.new_bi_unifier(), self.name)
         if undo is None:
             return
-        self.log(event.formula.table,
+        self.log(event.formula.table.table,
                  "binding list for event and delta-rule trigger: %s", binding)
         bindings = self.top_down_evaluation(
             delta_rule.variables(), delta_rule.body, binding)
-        self.log(event.formula.table, "new bindings after top-down: %s",
+        self.log(event.formula.table.table, "new bindings after top-down: %s",
                  ",".join([str(x) for x in bindings]))
 
         if delta_rule.trigger.is_negated():
@@ -565,9 +559,10 @@ class MaterializedViewTheory(TopDownTheory):
             new_atom = atom.plug(binding)
             if new_atom not in new_atoms:
                 new_atoms[new_atom] = []
-            new_atoms[new_atom].append(Database.Proof(
+            new_atoms[new_atom].append(database.Database.Proof(
                 binding, original_rule))
-        self.log(atom.table, "new tuples generated: %s", iterstr(new_atoms))
+        self.log(atom.table.table, "new tuples generated: %s",
+                 utility.iterstr(new_atoms))
 
         # enqueue each distinct generated tuple, recording appropriate bindings
         for new_atom in new_atoms:
@@ -575,7 +570,7 @@ class MaterializedViewTheory(TopDownTheory):
             #          new_tuples[new_tuple])
             # Only enqueue if new data.
             # Putting the check here is necessary to support recursion.
-            self.enqueue(Event(formula=new_atom,
+            self.enqueue(compile.Event(formula=new_atom,
                          proofs=new_atoms[new_atom],
                          insert=insert))
 

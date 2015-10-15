@@ -22,13 +22,15 @@ import json
 import re
 import uuid
 
-from oslo.config import cfg
+from oslo_config import cfg
+from oslo_log import log as logging
+import six
 import webob
 import webob.dec
 
+from congress.api import error_codes
 from congress.common import policy
 from congress import exception
-from congress.openstack.common import log as logging
 
 
 LOG = logging.getLogger(__name__)
@@ -80,6 +82,23 @@ class DataModelException(Exception):
         self.data = data
         self.http_status_code = http_status_code
 
+    @classmethod
+    def create(cls, error):
+        """Generate a DataModelException from an existing CongressException.
+
+        :param error has a 'name' field corresponding to an error_codes
+        error-name.  It may also have a 'data' field.
+        Returns a DataModelException properly populated.
+        """
+        name = getattr(error, "name", error_codes.UNKNOWN)
+        description = error_codes.get_desc(name)
+        if error.message:
+            description += "::" + error.message
+        return cls(error_code=error_codes.get_num(name),
+                   description=description,
+                   data=getattr(error, 'data', None),
+                   http_status_code=error_codes.get_http(name))
+
     def rest_response(self):
         return error_response(self.http_status_code, self.error_code,
                               self.description, self.data)
@@ -109,6 +128,21 @@ class AbstractApiHandler(object):
         # remove all the None values before returning
         return dict([(k, v) for k, v in m.groupdict().items()
                      if v is not None])
+
+    def _parse_json_body(self, request):
+        content_type = (request.content_type or "application/json").lower()
+        if content_type != 'application/json':
+            raise DataModelException(
+                400, "Unsupported Content-Type; must be 'application/json'")
+        if request.charset != 'UTF-8':
+            raise DataModelException(
+                400, "Unsupported charset: must be 'UTF-8'")
+        try:
+            request.parsed_body = json.loads(request.body)
+        except ValueError as e:
+            msg = "Failed to parse body as %s: %s" % (content_type, e)
+            raise DataModelException(400, msg)
+        return request.parsed_body
 
     def handles_request(self, request):
         """Return true iff handler supports the request."""
@@ -218,7 +252,7 @@ class ElementHandler(AbstractApiHandler):
             else:
                 errstr = "Missing required action parameter."
             return error_response(httplib.BAD_REQUEST, 400, errstr)
-        model_method = "%s_action" % action[0]
+        model_method = "%s_action" % action[0].replace('-', '_')
         f = getattr(self.model, model_method, None)
         if f is None:
             return NOT_SUPPORTED_RESPONSE
@@ -240,7 +274,7 @@ class ElementHandler(AbstractApiHandler):
 
         id_ = self._get_element_id(request)
         try:
-            item = json.loads(request.body)
+            item = self._parse_json_body(request)
             self.model.update_item(id_, item, request.params,
                                    context=self._get_context(request))
         except KeyError:
@@ -264,7 +298,7 @@ class ElementHandler(AbstractApiHandler):
         if item is None:
             return error_response(httplib.NOT_FOUND, 404, 'Not found')
 
-        updates = json.loads(request.body)
+        updates = self._parse_json_body(request)
         item.update(updates)
         self.model.update_item(id_, item, request.params, context=context)
         return webob.Response(body="%s\n" % json.dumps(item),
@@ -345,7 +379,7 @@ class CollectionHandler(AbstractApiHandler):
                 policy.enforce(context, action, target)
             except exception.PolicyNotAuthorized as e:
                 LOG.info(e)
-                return webob.Response(body=unicode(e), status=e.code,
+                return webob.Response(body=six.text_type(e), status=e.code,
                                       content_type='application/json')
         if request.method == 'GET' and self.allow_list:
             return self.list_members(request)
@@ -385,7 +419,7 @@ class CollectionHandler(AbstractApiHandler):
     def create_member(self, request, id_=None):
         if not hasattr(self.model, 'add_item'):
             return NOT_SUPPORTED_RESPONSE
-        item = json.loads(request.body)
+        item = self._parse_json_body(request)
         context = self._get_context(request)
         try:
             id_, item = self.model.add_item(

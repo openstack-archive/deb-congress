@@ -17,11 +17,11 @@ import json
 import os
 import time
 
+from oslo_log import log as logging
 import retrying
 
 from congress.datalog import compile
 from congress.datalog import unify
-from congress.openstack.common import log as logging
 from congress.policy_engines import agnostic
 
 
@@ -312,6 +312,18 @@ def retry_check_function_return_value(f, expected_value):
         raise Exception("Expected value '%s' not received" % expected_value)
 
 
+@retrying.retry(stop_max_attempt_number=10, wait_fixed=500)
+def retry_check_function_return_value_not_eq(f, value):
+    """Check if function f does not return expected value."""
+    if f() == value:
+        raise Exception("Actual value '%s' not different from '%s'" % value)
+
+
 class FakeRequest(object):
     def __init__(self, body):
         self.body = json.dumps(body)
+
+
+class FakeServiceObj():
+    def __init__(self):
+        self.state = {}

@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 from oslo_log import log as logging
+from tempest_lib import decorators
 
 from tempest import clients  # noqa
 from tempest import config  # noqa
@@ -39,11 +40,12 @@ class TestCinderDriver(manager_congress.ScenarioPolicyBase):
 
     def setUp(cls):
         super(TestCinderDriver, cls).setUp()
-        cls.os = clients.Manager(cls.admin_credentials())
+        cls.os = clients.Manager(cls.admin_manager.auth_provider.credentials)
         cls.cinder = cls.os.volumes_client
         cls.datasource_id = manager_congress.get_datasource_id(
             cls.admin_manager.congress_client, 'cinder')
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     def test_cinder_volumes_table(self):
         volume_schema = (
@@ -75,6 +77,6 @@ class TestCinderDriver(manager_congress.ScenarioPolicyBase):
             return True
 
         if not test.call_until_true(func=_check_data_table_cinder_volumes,
-                                    duration=20, sleep_for=4):
+                                    duration=100, sleep_for=5):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")

@@ -15,10 +15,11 @@
 import copy
 
 import ceilometerclient.client as cc
+from oslo_log import log as logging
+import six
 
 from congress.datasources import datasource_driver
-from congress.datasources import datasource_utils
-from congress.openstack.common import log as logging
+from congress.datasources import datasource_utils as ds_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -38,7 +39,8 @@ def d6service(name, keys, inbox, datapath, args):
 #   into DataSourceDriver.  E.g. change all the classes to Driver instead of
 #   NeutronDriver, CeilometerDriver, etc. and move the d6instantiate function
 #   to DataSourceDriver.
-class CeilometerDriver(datasource_driver.DataSourceDriver):
+class CeilometerDriver(datasource_driver.DataSourceDriver,
+                       datasource_driver.ExecutionDriver):
     METERS = "meters"
     ALARMS = "alarms"
     EVENTS = "events"
@@ -99,15 +101,25 @@ class CeilometerDriver(datasource_driver.DataSourceDriver):
             ({'fieldname': 'message_id', 'translator': value_trans},
              {'fieldname': 'event_type', 'translator': value_trans},
              {'fieldname': 'generated', 'translator': value_trans},
-             {'fieldname': 'traits', 'col': 'trait_id',
-              'translator': {'translation-type': 'VDICT',
+             {'fieldname': 'traits',
+              'translator': {'translation-type': 'HDICT',
                              'table-name': EVENT_TRAITS,
-                             'id-col': 'trait_id',
-                             'key-col': 'key', 'val-col': 'value',
-                             'translator': value_trans}})}
+                             'selector-type': 'DICT_SELECTOR',
+                             'in-list': True,
+                             'parent-key': 'message_id',
+                             'parent-col-name': 'event_message_id',
+                             'field-translators':
+                                 ({'fieldname': 'name',
+                                   'translator': value_trans},
+                                  {'fieldname': 'type',
+                                   'translator': value_trans},
+                                  {'fieldname': 'value',
+                                   'translator': value_trans}
+                                  )}}
+             )}
 
     def safe_id(x):
-        if isinstance(x, basestring):
+        if isinstance(x, six.string_types):
             return x
         try:
             return x['resource_id']
@@ -142,10 +154,12 @@ class CeilometerDriver(datasource_driver.DataSourceDriver):
     def __init__(self, name='', keys='', inbox=None, datapath=None, args=None):
         super(CeilometerDriver, self).__init__(name, keys, inbox,
                                                datapath, args)
+        datasource_driver.ExecutionDriver.__init__(self)
         self.creds = self.get_ceilometer_credentials_v2(args)
         self.ceilometer_client = cc.get_client(**self.creds)
-        self.raw_state = {}
-        self.initialized = True
+        self.inspect_builtin_methods(self.ceilometer_client,
+                                     'ceilometerclient.v2.')
+        self._init_end_start_poll()
 
     @staticmethod
     def get_datasource_info():
@@ -153,7 +167,7 @@ class CeilometerDriver(datasource_driver.DataSourceDriver):
         result['id'] = 'ceilometer'
         result['description'] = ('Datasource driver that interfaces with '
                                  'ceilometer.')
-        result['config'] = datasource_utils.get_openstack_required_config()
+        result['config'] = ds_utils.get_openstack_required_config()
         result['secret'] = ['password']
         return result
 
@@ -164,47 +178,45 @@ class CeilometerDriver(datasource_driver.DataSourceDriver):
         """
         LOG.debug("Ceilometer grabbing meters")
         meters = self.ceilometer_client.meters.list()
-        if ('meters' not in self.raw_state or meters !=
-                self.raw_state['meters']):
-            self.raw_state['meters'] = meters
-            self._translate_meters(meters)
+        self._translate_meters(meters)
+        LOG.debug("METERS: %s" % str(self.state[self.METERS]))
 
         LOG.debug("Ceilometer grabbing alarms")
         alarms = self.ceilometer_client.alarms.list()
-        if ('alarms' not in self.raw_state or alarms !=
-                self.raw_state['alarms']):
-            self.raw_state['alarms'] = alarms
-            self._translate_alarms(alarms)
+        self._translate_alarms(alarms)
+        LOG.debug("ALARMS: %s" % str(self.state[self.ALARMS]))
+        LOG.debug("THRESHOLD: %s"
+                  % str(self.state[self.ALARM_THRESHOLD_RULE]))
 
         LOG.debug("Ceilometer grabbing events")
         events = self.ceilometer_client.events.list()
-        if ('events' not in self.raw_state or events !=
-                self.raw_state['events']):
-            self.raw_state['events'] = events
-            self._translate_events(events)
+        self._translate_events(events)
+        LOG.debug("EVENTS: %s" % str(self.state[self.EVENTS]))
+        LOG.debug("TRAITS: %s" % str(self.state[self.EVENT_TRAITS]))
 
         LOG.debug("Ceilometer grabbing statistics")
-        statistics = []
-        if ('statistics' not in self.raw_state or statistics !=
-                self.raw_state['statistics']):
+        statistics = self._get_statistics(meters)
+        self._translate_statistics(statistics)
+        LOG.debug("STATISTICS: %s" % str(self.state[self.STATISTICS]))
 
-            names = set()
-            for m in meters:
-                LOG.debug("Adding meter %s" % m.name)
-                names.add(m.name)
-            for meter_name in names:
-                LOG.debug("Getting all Resource ID for meter: %s"
-                          % meter_name)
-                stat_list = self.ceilometer_client.statistics.list(
-                    meter_name, groupby=['resource_id'])
-                LOG.debug("Statistics List: %s" % stat_list)
-                if (stat_list):
-                    for temp in stat_list:
-                        temp_dict = copy.copy(temp.to_dict())
-                        temp_dict['meter_name'] = meter_name
-                        statistics.append(temp_dict)
-            self.raw_state['statistics'] = statistics
-            self._translate_statistics(statistics)
+    def _get_statistics(self, meters):
+        statistics = []
+        names = set()
+        for m in meters:
+            LOG.debug("Adding meter %s" % m.name)
+            names.add(m.name)
+        for meter_name in names:
+            LOG.debug("Getting all Resource ID for meter: %s"
+                      % meter_name)
+            stat_list = self.ceilometer_client.statistics.list(
+                meter_name, groupby=['resource_id'])
+            LOG.debug("Statistics List: %s" % stat_list)
+            if (stat_list):
+                for temp in stat_list:
+                    temp_dict = copy.copy(temp.to_dict())
+                    temp_dict['meter_name'] = meter_name
+                    statistics.append(temp_dict)
+        return statistics
 
     def get_ceilometer_credentials_v2(self, creds):
         d = {}
@@ -215,82 +227,51 @@ class CeilometerDriver(datasource_driver.DataSourceDriver):
         d['tenant_name'] = creds['tenant_name']
         return d
 
+    @ds_utils.update_state_on_changed(METERS)
     def _translate_meters(self, obj):
-        """Translate the meters represented by OBJ into tables.
-
-        Assigns self.state[tablename] for the table names
-        generated from OBJ: METERS
-        """
+        """Translate the meters represented by OBJ into tables."""
         meters = [o.to_dict() for o in obj]
 
         LOG.debug("METERS: %s" % str(meters))
 
         row_data = CeilometerDriver.convert_objs(meters,
                                                  self.meters_translator)
-        self.state[self.METERS] = set()
-        for table, row in row_data:
-            assert table == self.METERS
-            self.state[table].add(row)
+        return row_data
 
-        LOG.debug("METERS: %s" % str(self.state[self.METERS]))
-
+    @ds_utils.update_state_on_changed(ALARMS)
     def _translate_alarms(self, obj):
-        """Translate the alarms represented by OBJ into tables.
-
-        Assigns self.state[tablename] for the table names
-        generated from OBJ: ALARMS, ALARM_THRESHOLD_RULE
-        """
+        """Translate the alarms represented by OBJ into tables."""
         alarms = [o.to_dict() for o in obj]
         LOG.debug("ALARMS: %s" % str(alarms))
 
         row_data = CeilometerDriver.convert_objs(alarms,
                                                  self.alarms_translator)
-        alarm_tables = (self.ALARMS, self.ALARM_THRESHOLD_RULE)
-        for table in alarm_tables:
-            self.state[table] = set()
-        for table, row in row_data:
-            assert table in alarm_tables
-            self.state[table].add(row)
+        return row_data
 
-        LOG.debug("ALARMS: %s" % str(self.state[self.ALARMS]))
-        LOG.debug("THRESHOLD: %s"
-                  % str(self.state[self.ALARM_THRESHOLD_RULE]))
-
+    @ds_utils.update_state_on_changed(EVENTS)
     def _translate_events(self, obj):
-        """Translate the events represented by OBJ into tables.
-
-        Assigns self.state[tablename] for the table names
-        generated from OBJ: EVENTS, EVENT_TRAITS.
-        """
+        """Translate the events represented by OBJ into tables."""
         events = [o.to_dict() for o in obj]
         LOG.debug("EVENTS: %s" % str(events))
 
         row_data = CeilometerDriver.convert_objs(events,
                                                  self.events_translator)
+        return row_data
 
-        event_tables = (self.EVENTS, self.EVENT_TRAITS)
-        for table in event_tables:
-            self.state[table] = set()
-        for table, row in row_data:
-            assert table in event_tables
-            self.state[table].add(row)
-
-        LOG.debug("EVENTS: %s" % str(self.state[self.EVENTS]))
-        LOG.debug("TRAITS: %s" % str(self.state[self.EVENT_TRAITS]))
-
+    @ds_utils.update_state_on_changed(STATISTICS)
     def _translate_statistics(self, obj):
-        """Translate the statistics represented by OBJ into tables.
-
-        Assigns self.state[tablename] for the table names
-        generated from OBJ: STATISTICS
-        """
+        """Translate the statistics represented by OBJ into tables."""
         LOG.debug("STATISTICS: %s" % str(obj))
 
         row_data = CeilometerDriver.convert_objs(obj,
                                                  self.statistics_translator)
-        self.state[self.STATISTICS] = set()
-        for table, row in row_data:
-            assert table == self.STATISTICS
-            self.state[table].add(row)
+        return row_data
 
-        LOG.debug("STATISTICS: %s" % str(self.state[self.STATISTICS]))
+    def execute(self, action, action_args):
+        """Overwrite ExecutionDriver.execute()."""
+        # action can be written as a method or an API call.
+        func = getattr(self, action, None)
+        if func and self.is_executable(func):
+            func(action_args)
+        else:
+            self._execute_api(self.ceilometer_client, action, action_args)

@@ -13,11 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-import neutronclient.v2_0.client
 
-from congress.datasources.datasource_driver import DataSourceDriver
-from congress.datasources import datasource_utils
-from congress.openstack.common import log as logging
+import neutronclient.v2_0.client
+from oslo_log import log as logging
+
+from congress.datasources import datasource_driver
+from congress.datasources import datasource_utils as ds_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -27,14 +28,29 @@ def d6service(name, keys, inbox, datapath, args):
     return NeutronV2Driver(name, keys, inbox, datapath, args)
 
 
-class NeutronV2Driver(DataSourceDriver):
+class NeutronV2Driver(datasource_driver.DataSourceDriver,
+                      datasource_driver.ExecutionDriver):
+
+    NETWORKS = 'networks'
+    FIXED_IPS = 'fixed_ips'
+    SECURITY_GROUP_PORT_BINDINGS = 'security_group_port_bindings'
+    PORTS = 'ports'
+    ALLOCATION_POOLS = 'allocation_pools'
+    DNS_NAMESERVERS = 'dns_nameservers'
+    HOST_ROUTES = 'host_routes'
+    SUBNETS = 'subnets'
+    EXTERNAL_FIXED_IPS = 'external_fixed_ips'
+    EXTERNAL_GATEWAY_INFOS = 'external_gateway_infos'
+    ROUTERS = 'routers'
+    SECURITY_GROUP_RULES = 'security_group_rules'
+    SECURITY_GROUPS = 'security_groups'
 
     # This is the most common per-value translator, so define it once here.
     value_trans = {'translation-type': 'VALUE'}
 
     networks_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'networks',
+        'table-name': NETWORKS,
         'selector-type': 'DICT_SELECTOR',
         'field-translators':
             ({'fieldname': 'id', 'translator': value_trans},
@@ -46,7 +62,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     ports_fixed_ips_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'fixed_ips',
+        'table-name': FIXED_IPS,
         'parent-key': 'id',
         'parent-col-name': 'port_id',
         'selector-type': 'DICT_SELECTOR',
@@ -57,7 +73,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     ports_security_groups_translator = {
         'translation-type': 'LIST',
-        'table-name': 'security_group_port_bindings',
+        'table-name': SECURITY_GROUP_PORT_BINDINGS,
         'parent-key': 'id',
         'parent-col-name': 'port_id',
         'val-col': 'security_group_id',
@@ -65,7 +81,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     ports_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'ports',
+        'table-name': PORTS,
         'selector-type': 'DICT_SELECTOR',
         'field-translators':
             ({'fieldname': 'id', 'translator': value_trans},
@@ -84,7 +100,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     subnets_allocation_pools_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'allocation_pools',
+        'table-name': ALLOCATION_POOLS,
         'parent-key': 'id',
         'selector-type': 'DICT_SELECTOR',
         'in-list': True,
@@ -94,7 +110,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     subnets_dns_nameservers_translator = {
         'translation-type': 'LIST',
-        'table-name': 'dns_nameservers',
+        'table-name': DNS_NAMESERVERS,
         'parent-key': 'id',
         'parent-col-name': 'subnet_id',
         'val-col': 'dns_nameserver',
@@ -102,7 +118,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     subnets_routes_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'host_routes',
+        'table-name': HOST_ROUTES,
         'parent-key': 'id',
         'parent-col-name': 'subnet_id',
         'selector-type': 'DICT_SELECTOR',
@@ -113,7 +129,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     subnets_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'subnets',
+        'table-name': SUBNETS,
         'selector-type': 'DICT_SELECTOR',
         'field-translators':
             ({'fieldname': 'id', 'translator': value_trans},
@@ -135,7 +151,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     external_fixed_ips_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'external_fixed_ips',
+        'table-name': EXTERNAL_FIXED_IPS,
         'parent-key': 'router_id',
         'parent-col-name': 'router_id',
         'selector-type': 'DICT_SELECTOR',
@@ -146,7 +162,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     routers_external_gateway_infos_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'external_gateway_infos',
+        'table-name': EXTERNAL_GATEWAY_INFOS,
         'parent-key': 'id',
         'parent-col-name': 'router_id',
         'selector-type': 'DICT_SELECTOR',
@@ -158,7 +174,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     routers_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'routers',
+        'table-name': ROUTERS,
         'selector-type': 'DICT_SELECTOR',
         'field-translators':
             ({'fieldname': 'id', 'translator': value_trans},
@@ -172,7 +188,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     security_group_rules_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'security_group_rules',
+        'table-name': SECURITY_GROUP_RULES,
         'parent-key': 'id',
         'parent-col-name': 'security_group_id',
         'selector-type': 'DICT_SELECTOR',
@@ -190,7 +206,7 @@ class NeutronV2Driver(DataSourceDriver):
 
     security_group_translator = {
         'translation-type': 'HDICT',
-        'table-name': 'security_groups',
+        'table-name': SECURITY_GROUPS,
         'selector-type': 'DICT_SELECTOR',
         'field-translators':
             ({'fieldname': 'id', 'translator': value_trans},
@@ -207,17 +223,11 @@ class NeutronV2Driver(DataSourceDriver):
                  datapath=None, args=None):
         super(NeutronV2Driver, self).__init__(name, keys, inbox,
                                               datapath, args)
-        self._initialize_tables()
+        datasource_driver.ExecutionDriver.__init__(self)
         self.creds = args
         self.neutron = neutronclient.v2_0.client.Client(**self.creds)
-
-        # Store raw state (result of API calls) so that we can
-        #   avoid re-translating and re-sending if no changes occurred.
-        #   Because translation is not deterministic (we're generating
-        #   UUIDs), it's hard to tell if no changes occurred
-        #   after performing the translation.
-        self.raw_state = {}
-        self.initialized = True
+        self.inspect_builtin_methods(self.neutron, 'neutronclient.v2_0.client')
+        self._init_end_start_poll()
 
     def _initialize_tables(self):
         self.state['networks'] = set()
@@ -239,85 +249,70 @@ class NeutronV2Driver(DataSourceDriver):
         result['id'] = 'neutronv2'
         result['description'] = ('Datasource driver that interfaces with '
                                  'OpenStack Networking aka Neutron.')
-        result['config'] = datasource_utils.get_openstack_required_config()
+        result['config'] = ds_utils.get_openstack_required_config()
         result['secret'] = ['password']
         return result
 
     def update_from_datasource(self):
+
         LOG.debug("Neutron grabbing networks")
         networks = self.neutron.list_networks()
-        if ('networks' not in self.raw_state or
-                networks != self.raw_state['networks']):
-            self.raw_state['networks'] = networks
-            self._translate_networks(networks)
+        self._translate_networks(networks)
 
         LOG.debug("Neutron grabbing ports")
         ports = self.neutron.list_ports()
-        if 'ports' not in self.raw_state or ports != self.raw_state['ports']:
-            self.raw_state['ports'] = ports
-            self._translate_ports(ports)
+        self._translate_ports(ports)
 
         subnets = self.neutron.list_subnets()
-        if ('subnets' not in self.raw_state
-                or subnets != self.raw_state['subnets']):
-            self.raw_state['subnets'] = subnets
-            self._translate_subnets(subnets)
+        self._translate_subnets(subnets)
+
         routers = self.neutron.list_routers()
-        if ('routers' not in self.raw_state
-                or routers != self.raw_state['routers']):
-            self.raw_state['routers'] = routers
-            self._translate_routers(routers)
+        self._translate_routers(routers)
 
         security_groups = self.neutron.list_security_groups()
-        if ('security_groups' not in self.raw_state
-                or security_groups != self.raw_state['security_groups']):
-            self.raw_state['security_groups'] = security_groups
-            self._translate_security_groups(security_groups)
+        self._translate_security_groups(security_groups)
 
+    @ds_utils.update_state_on_changed(NETWORKS)
     def _translate_networks(self, obj):
         LOG.debug("networks: %s", dict(obj))
 
         row_data = NeutronV2Driver.convert_objs(obj['networks'],
                                                 self.networks_translator)
-        self.state['networks'] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(PORTS)
     def _translate_ports(self, obj):
         LOG.debug("ports: %s", obj)
         row_data = NeutronV2Driver.convert_objs(obj['ports'],
                                                 self.ports_translator)
-        self.state['ports'] = set()
-        self.state['fixed_ips'] = set()
-        self.state['security_group_port_bindings'] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(SUBNETS)
     def _translate_subnets(self, obj):
         LOG.debug("subnets: %s", obj)
         row_data = NeutronV2Driver.convert_objs(obj['subnets'],
                                                 self.subnets_translator)
-        self.state['subnets'] = set()
-        self.state['host_routes'] = set()
-        self.state['dns_nameservers'] = set()
-        self.state['allocation_pools'] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(ROUTERS)
     def _translate_routers(self, obj):
         LOG.debug("routers: %s", obj)
         row_data = NeutronV2Driver.convert_objs(obj['routers'],
                                                 self.routers_translator)
-        self.state['routers'] = set()
-        self.state['external_gateway_infos'] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
 
+    @ds_utils.update_state_on_changed(SECURITY_GROUPS)
     def _translate_security_groups(self, obj):
         LOG.debug("security_groups: %s", obj)
         row_data = NeutronV2Driver.convert_objs(obj['security_groups'],
                                                 self.security_group_translator)
-        self.state['security_groups'] = set()
-        self.state['security_group_rules'] = set()
-        for table, row in row_data:
-            self.state[table].add(row)
+        return row_data
+
+    def execute(self, action, action_args):
+        """Overwrite ExecutionDriver.execute()."""
+        # action can be written as a method or an API call.
+        func = getattr(self, action, None)
+        if func and self.is_executable(func):
+            func(action_args)
+        else:
+            self._execute_api(self.neutron, action, action_args)

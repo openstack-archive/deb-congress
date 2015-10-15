@@ -18,6 +18,7 @@ import novaclient
 from congress.datalog import compile
 from congress.datasources import nova_driver
 from congress.dse import d6cage
+from congress import exception
 from congress.tests import base
 from congress.tests.datasources import fakes
 from congress.tests import helper
@@ -180,6 +181,22 @@ class TestNovaDriver(base.TestCase):
                 self.assertEqual('nova-cert', service)
                 self.assertEqual('nova1', str(zone))
 
+    def test_services(self):
+        service_list = self.nova.services.list()
+        self.driver._translate_services(service_list)
+        expected_ret = {
+            1: [1, 'nova-compute', 'nova', 'nova1', 'enabled', 'up',
+                '2015-07-28T08:28:37.000000', 'None'],
+            2: [2, 'nova-schedule', 'nova', 'nova1', 'disabled', 'up',
+                '2015-07-28T08:28:38.000000', 'daily maintenance']
+        }
+        service_tuples = self.driver.state[self.driver.SERVICES]
+
+        self.assertEqual(2, len(service_tuples))
+
+        for s in service_tuples:
+            map(self.assertEqual, expected_ret[s[0]], s)
+
     def test_communication(self):
         """Test for communication.
 
@@ -197,7 +214,8 @@ class TestNovaDriver(base.TestCase):
         cage.loadModule("PolicyDriver", helper.policy_module_path())
         cage.createservice(name="policy", moduleName="PolicyDriver",
                            args={'d6cage': cage,
-                                 'rootdir': helper.data_module_path('')})
+                                 'rootdir': helper.data_module_path(''),
+                                 'log_actions_only': True})
         cage.createservice(name="nova", moduleName="NovaDriver", args=args)
 
         # Check that data gets sent from nova to policy as expected
@@ -236,3 +254,49 @@ class TestNovaDriver(base.TestCase):
     #   works properly.  Or perhaps could bundle this into the
     #   tests above if we check self.state results.
     #   See Neutron's test_polling
+
+    def test_execute(self):
+        class NovaClient(object):
+            def __init__(self):
+                self.testkey = None
+
+            def connectNetwork(self, arg1):
+                self.testkey = 'arg1=%s' % arg1
+
+        nova_client = NovaClient()
+        self.driver.nova_client = nova_client
+        api_args = {
+            'positional': ['1']
+        }
+        expected_ans = 'arg1=1'
+
+        self.driver.execute('connectNetwork', api_args)
+
+        self.assertEqual(nova_client.testkey, expected_ans)
+
+    def test_execute_servers_set_meta(self):
+        class server(object):
+            def __init__(self):
+                self.testkey = None
+
+            def set_meta(self, server=None, metadata=None):
+                self.testkey = 'server=%s, metadata=%s' % (server, metadata)
+
+        class NovaClient(object):
+            def __init__(self):
+                self.servers = server()
+
+        nova_client = NovaClient()
+        self.driver.nova_client = nova_client
+        expected_ans = "server=1, metadata={'meta-key1': 'meta-value1'}"
+
+        action_args = {'positional': ['1', 'meta-key1', 'meta-value1']}
+        self.driver.execute('servers_set_meta', action_args)
+
+        self.assertEqual(nova_client.servers.testkey, expected_ans)
+
+    def test_execute_with_non_executable_method(self):
+        action_args = {'positional': ['1', 'meta-key1', 'meta-value1']}
+        self.assertRaises(exception.CongressException,
+                          self.driver.execute,
+                          'get_nova_credentials_v2', action_args)

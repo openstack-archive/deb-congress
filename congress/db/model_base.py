@@ -14,12 +14,11 @@
 # limitations under the License.
 import datetime
 
-from oslo.db.sqlalchemy import models
+from oslo_db.sqlalchemy import models
+from oslo_utils import uuidutils
 import sqlalchemy as sa
 from sqlalchemy.ext import declarative
 from sqlalchemy import orm
-
-from congress.openstack.common import uuidutils
 
 
 class CongressBase(models.ModelBase):
@@ -37,7 +36,7 @@ class CongressBase(models.ModelBase):
         return self
 
     def next(self):
-        n = self._i.next().name
+        n = next(self._i).name
         return n, getattr(self, n)
 
     def __repr__(self):

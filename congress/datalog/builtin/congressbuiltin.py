@@ -16,6 +16,8 @@
 #
 import datetime
 
+import six
+
 from thirdparty_dateutil import parser as datetime_parser
 
 
@@ -24,7 +26,7 @@ class DatetimeBuiltins(object):
     # casting operators (used internally)
     @classmethod
     def to_timedelta(cls, x):
-        if isinstance(x, basestring):
+        if isinstance(x, six.string_types):
             fields = x.split(":")
             num_fields = len(fields)
             args = {}
@@ -221,7 +223,6 @@ class CongressBuiltinCategoryMap(object):
         nfunc = predtriple['func']
         nfunc_pred = nfunc.split("(")[0]
         nfunc_arglist = nfunc.split("(")[1].split(")")[0].split(",")
-        # print ncode, ninputs, nfunc, nfunc_pred, nfunc_arglist
         pred = CongressBuiltinPred(nfunc_pred, nfunc_arglist, ninputs, ncode)
         return pred
 
@@ -229,8 +230,6 @@ class CongressBuiltinCategoryMap(object):
         for key, value in newmap.items():
             if key not in self.categorydict:
                 self.categorydict[key] = []
-                # print key
-                # print 'category exists'
             for predtriple in value:
                 pred = self.dict_predtriple_to_pred(predtriple)
                 if not self.builtin_is_registered(pred):
@@ -315,18 +314,19 @@ class CongressBuiltinCategoryMap(object):
                 return True
         return False
 
-    def is_builtin(self, predname, arity):
-        """Given a name and arity, check if it is a builtin."""
-        # print "check_if_builtin_by_name {} {}".format(predname, arity)
-        if predname in self.preddict:
-            if len(self.preddict[predname][0].predargs) == arity:
+    def is_builtin(self, table, arity):
+        """Given a Tablename and arity, check if it is a builtin."""
+        if table.table in self.preddict:
+            if len(self.preddict[table.table][0].predargs) == arity:
                 return True
         return False
 
-    def builtin(self, predname):
-        """Return a CongressBuiltinPred with name PREDNAME or None."""
-        if predname in self.preddict:
-            return self.preddict[predname][0]
+    def builtin(self, table):
+        """Return a CongressBuiltinPred for given Tablename or None."""
+        if not isinstance(table, six.string_types):
+            table = table.table
+        if table in self.preddict:
+            return self.preddict[table][0]
         return None
 
     def list_available_builtins(self):

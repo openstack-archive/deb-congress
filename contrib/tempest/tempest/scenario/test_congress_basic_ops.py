@@ -14,9 +14,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 from oslo_log import log as logging
+from tempest_lib import decorators
 
 from tempest import config  # noqa
 from tempest import exceptions  # noqa
+from tempest.scenario import helper
 from tempest.scenario import manager_congress  # noqa
 from tempest import test  # noqa
 
@@ -54,7 +56,24 @@ class TestPolicyBasicOps(manager_congress.ScenarioPolicyBase):
                         resp['id'])
         return resp['name']
 
-    def _create_test_server(self):
+    def _create_policy_rule(self, policy_name, rule, rule_name=None,
+                            comment=None):
+        body = {'rule': rule}
+        if rule_name:
+            body['name'] = rule_name
+        if comment:
+            body['comment'] = comment
+        client = self.admin_manager.congress_client
+        response = client.create_policy_rule(policy_name, body)
+        if response:
+            self.addCleanup(client.delete_policy_rule, policy_name,
+                            response['id'])
+            return response
+        else:
+            raise Exception('Failed to create policy rule (%s, %s)'
+                            % (policy_name, rule))
+
+    def _create_test_server(self, name=None):
         image_ref = CONF.compute.image_ref
         flavor_ref = CONF.compute.flavor_ref
         keypair = self.create_keypair()
@@ -62,11 +81,13 @@ class TestPolicyBasicOps(manager_congress.ScenarioPolicyBase):
         security_groups = [{'name': security_group['name']}]
         create_kwargs = {'key_name': keypair['name'],
                          'security_groups': security_groups}
-        instance = self.create_server(image=image_ref,
+        instance = self.create_server(name=name,
+                                      image=image_ref,
                                       flavor=flavor_ref,
                                       create_kwargs=create_kwargs)
         return instance
 
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     @test.services('compute', 'network')
     def test_execution_action(self):
@@ -75,16 +96,31 @@ class TestPolicyBasicOps(manager_congress.ScenarioPolicyBase):
         congress_client = self.admin_manager.congress_client
         servers_client = self.admin_manager.servers_client
         policy = self._create_random_policy()
-        args = {'name': 'nova:servers.set_meta',
-                'args': {'positional': [],
-                         'named': {'server': server['id'],
-                                   'metadata': metadata}}}
-        congress_client.execute_policy_action(policy, "execute", False,
-                                              False, args)
+        service = 'nova'
+        action = 'servers.set_meta'
+        action_args = {'args': {'positional': [],
+                                'named': {'server': server['id'],
+                                          'metadata': metadata}}}
+        body = action_args
+
+        # execute via datasource api
+        body.update({'name': action})
+        congress_client.execute_datasource_action(service, "execute", body)
         return_meta = servers_client.get_server_metadata_item(server["id"],
                                                               "testkey1")
-        self.assertEqual(metadata, return_meta[1])
+        self.assertEqual(metadata, return_meta,
+                         "Failed to execute action via datasource API")
 
+        # execute via policy api
+        body.update({'name': service + ':' + action})
+        congress_client.execute_policy_action(policy, "execute", False,
+                                              False, body)
+        return_meta = servers_client.get_server_metadata_item(server["id"],
+                                                              "testkey1")
+        self.assertEqual(metadata, return_meta,
+                         "Failed to execute action via policy API")
+
+    @decorators.skip_because(bug='1486246')
     @test.attr(type='smoke')
     @test.services('compute', 'network')
     def test_policy_basic_op(self):
@@ -118,9 +154,35 @@ class TestPolicyBasicOps(manager_congress.ScenarioPolicyBase):
             else:
                 return False
 
-        if not test.call_until_true(func=check_data, duration=20, sleep_for=4):
+        if not test.call_until_true(func=check_data, duration=100, sleep_for=5):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")
+
+    @decorators.skip_because(bug='1486246')
+    @test.attr(type='smoke')
+    @test.services('compute', 'network')
+    def test_reactive_enforcement(self):
+        servers_client = self.admin_manager.servers_client
+        server_name = 'server_under_test'
+        server = self._create_test_server(name=server_name)
+        policy_name = self._create_random_policy()
+        meta_key = 'meta_test_key1'
+        meta_val = 'value1'
+        meta_data = {meta_key: meta_val}
+        rules = [
+            'execute[nova:servers_set_meta(id, "%s", "%s")] :- '
+            'test_servers(id)' % (meta_key, meta_val),
+            'test_servers(id) :- '
+            'nova:servers(id, name, host_id, status, '
+            'tenant_id, user_id, image_id, flavor_id),'
+            'equal(name, "%s")' % server_name]
+
+        for rule in rules:
+            self._create_policy_rule(policy_name, rule)
+
+        f = lambda: servers_client.get_server_metadata_item(server['id'],
+                                                            meta_key)
+        helper.retry_check_function_return_value(f, meta_data)
 
 
 class TestCongressDataSources(manager_congress.ScenarioPolicyBase):
@@ -149,7 +211,7 @@ class TestCongressDataSources(manager_congress.ScenarioPolicyBase):
 
         if not test.call_until_true(
             func=_check_all_datasources_are_initialized,
-                duration=20, sleep_for=4):
+                duration=100, sleep_for=5):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")
 
@@ -168,6 +230,6 @@ class TestCongressDataSources(manager_congress.ScenarioPolicyBase):
                     return False
             return True
 
-        if not test.call_until_true(func=check_data, duration=20, sleep_for=4):
+        if not test.call_until_true(func=check_data, duration=100, sleep_for=5):
             raise exceptions.TimeoutException("Data did not converge in time "
                                               "or failure in server")

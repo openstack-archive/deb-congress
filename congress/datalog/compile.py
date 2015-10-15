@@ -16,19 +16,21 @@
 import copy
 import functools
 import optparse
+import uuid
+
+import six
 
 import antlr3
 
 import CongressLexer
 import CongressParser
-import utility
+from oslo_log import log as logging
 
-from congress.datalog.analysis import ModalIndex
+from congress.datalog import analysis
 from congress.datalog.builtin import congressbuiltin
-from congress.datalog.utility import iterstr
-from congress.exception import PolicyException
-from congress.openstack.common import log as logging
-from congress.utils import Location
+from congress.datalog import utility
+from congress import exception
+from congress import utils
 
 LOG = logging.getLogger(__name__)
 
@@ -38,28 +40,6 @@ PERMITTED_MODALS = ['execute']
 ##############################################################################
 # Internal representation of policy language
 ##############################################################################
-
-# TODO(thinrichs): create a Tablename class
-def parse_tablename(tablename):
-    """Given tablename returns (service, name)."""
-    pieces = tablename.split(':')
-    if len(pieces) == 1:
-        return (None, pieces[0])
-    else:
-        return (pieces[0], ':'.join(pieces[1:]))
-
-
-def build_tablename(service, table):
-    if service is None:
-        return table
-    return service + ':' + table
-
-
-def literal_table_matches(lit, policy, table, modal=None):
-    if lit.theory == policy and lit.table == table and lit.modal == modal:
-        return True
-    lit_policy, lit_table = parse_tablename(lit.table)
-    return lit_table == table and lit_policy == policy and lit.modal == modal
 
 
 class Schema(object):
@@ -117,9 +97,9 @@ class Term(object):
             return value
         elif force_var:
             return Variable(str(value))
-        elif isinstance(value, basestring):
+        elif isinstance(value, six.string_types):
             return ObjectConstant(value, ObjectConstant.STRING)
-        elif isinstance(value, (int, long)):
+        elif isinstance(value, six.integer_types):
             return ObjectConstant(value, ObjectConstant.INTEGER)
         elif isinstance(value, float):
             return ObjectConstant(value, ObjectConstant.FLOAT)
@@ -135,7 +115,7 @@ class Variable (Term):
     __slots__ = ['name', 'location', '_hash']
 
     def __init__(self, name, location=None):
-        assert isinstance(name, basestring)
+        assert isinstance(name, six.string_types)
         self.name = name
         self.location = location
         self._hash = None
@@ -260,47 +240,209 @@ class Fact (tuple):
 
 
 @functools.total_ordering
-class Literal (object):
-    """Represents a possibly negated atomic statement, e.g. p(a, 17, b)."""
+class Tablename(object):
     SORT_RANK = 4
-    __slots__ = ['theory', 'table', 'arguments', 'location', 'negated',
-                 '_hash', 'modal']
+    __slots__ = ['service', 'table', 'modal', '_hash']
 
-    def __init__(self, table, arguments, location=None, negated=False,
-                 theory=None, modal=None, use_modules=True):
+    def __init__(self, table=None, service=None, modal=None):
+        self.table = table
+        self.service = service
+        self.modal = modal
+        self._hash = None
+
+    @classmethod
+    def create_from_tablename(cls, tablename, service=None, use_modules=True):
         # if use_modules is True,
         # break full tablename up into 2 pieces.  Example: "nova:servers:cpu"
         # self.theory = "nova"
         # self.table = "servers:cpu"
-        if theory is None and use_modules:
-            (self.theory, self.table) = self.partition_tablename(table)
+        if service is None and use_modules:
+            (service, tablename) = cls.parse_service_table(tablename)
+        return cls(service=service, table=tablename)
+
+    @classmethod
+    def parse_service_table(cls, tablename):
+        """Given tablename returns (service, name)."""
+        pieces = tablename.split(':')
+        if len(pieces) == 1:
+            table = pieces[0]
+            service = None
         else:
-            self.theory = theory
+            service = pieces[0]
+            table = ':'.join(pieces[1:])
+        return service, table
+
+    @classmethod
+    def build_service_table(cls, service, table):
+        """Return string service:table."""
+        return str(service) + ":" + str(table)
+
+    def global_tablename(self, prefix=None):
+        pieces = [x for x in [prefix, self.service, self.table]
+                  if x is not None]
+        return ":".join(pieces)
+
+    def matches(self, service, table, modal):
+        if (service == self.service and table == self.table and
+                modal == self.modal):
+            return True
+        self_service, self_table = self.parse_service_table(self.table)
+        return (service == self_service and
+                table == self_table and
+                modal == self.modal)
+
+    def __copy__(self):
+        return Tablename(
+            table=self.table, modal=self.modal, service=self.service)
+
+    def __lt__(self, other):
+        if self.SORT_RANK != other.SORT_RANK:
+            return self.SORT_RANK < other.SORT_RANK
+        if self.modal != other.modal:
+            return self.modal < other.modal
+        if self.service != other.service:
+            return self.service < other.service
+        if self.table != other.table:
+            return self.table < other.table
+
+    def __eq__(self, other):
+        return (isinstance(other, Tablename) and
+                self.table == other.table and
+                self.service == other.service and
+                self.modal == other.modal)
+
+    def same(self, other, default_service):
+        """Equality but where default_service is used for None service."""
+        if self.table != other.table:
+            return False
+        if self.modal != other.modal:
+            return False
+        selfservice = self.service or default_service
+        otherservice = other.service or default_service
+        return selfservice == otherservice
+
+    def __neq__(self, other):
+        return not self == other
+
+    def __hash__(self):
+        if self._hash is None:
+            self._hash = hash(('Tablename',
+                               hash(self.service),
+                               hash(self.table),
+                               hash(self.modal)))
+        return self._hash
+
+    def __str__(self):
+        return ":".join([x for x in [self.modal, self.service, self.table]
+                         if x is not None])
+
+    def __repr__(self):
+        return "Tablename(table=%s, service=%s, modal=%s)" % (
+            self.table, self.service, self.modal)
+
+    def name(self, default_service=None):
+        """Compute string name with default service."""
+        service = self.service or default_service
+        if service is None:
+            return self.table
+        return service + ":" + self.table
+
+    def invert_update(self):
+        """Invert the update.
+
+        If end of table name is + or -, return a copy after switching
+        the copy's sign.
+        Does not make a copy if table name does not end in + or -.
+        """
+        if self.table.endswith('+'):
+            suffix = '-'
+        elif self.table.endswith('-'):
+            suffix = '+'
+        else:
+            return self, False
+
+        new = copy.copy(self)
+        new.table = self.table[:-1] + suffix
+        return new, True
+
+    def drop_update(self):
+        """Drop the update.
+
+        If end of table name is + or -, return a copy without the sign.
+        If table name does not end in + or -, make no copy.
+        """
+        if self.table.endswith('+') or self.table.endswith('-'):
+            new = copy.copy(self)
+            new.table = new.table[:-1]
+            return new, True
+        else:
+            return self, False
+
+    def make_update(self, is_insert=True):
+        """Turn the tablename into a +/- update."""
+        new = copy.copy(self)
+        if is_insert:
+            new.table = new.table + "+"
+        else:
+            new.table = new.table + "-"
+        return new, True
+
+    def is_update(self):
+        return self.table.endswith('+') or self.table.endswith('-')
+
+    def drop_service(self):
+        self.service = None
+
+
+@functools.total_ordering
+class Literal (object):
+    """Represents a possibly negated atomic statement, e.g. p(a, 17, b)."""
+    SORT_RANK = 5
+    __slots__ = ['table', 'arguments', 'location', 'negated', '_hash',
+                 'id', 'name', 'comment', 'original_str']
+
+    def __init__(self, table, arguments, location=None, negated=False,
+                 use_modules=True, id_=None, name=None, comment=None,
+                 original_str=None):
+        if isinstance(table, Tablename):
             self.table = table
-        self.modal = modal
+        else:
+            self.table = Tablename.create_from_tablename(
+                table, use_modules=use_modules)
         self.arguments = arguments
         self.location = location
         self.negated = negated
         self._hash = None
+        self.id = id_
+        self.name = name
+        self.comment = comment
+        self.original_str = original_str
 
     def __copy__(self):
+        # use_modules=False so that we get exactly what we started
+        #   with
         newone = Literal(self.table, self.arguments, self.location,
-                         self.negated, self.theory, self.modal)
+                         self.negated, False, self.id,
+                         self.name, self.comment, self.original_str)
         return newone
 
-    @classmethod
-    def partition_tablename(cls, tablename):
-        """Cut string TABLENAME into the theory and the name of the table."""
-        (theory, sep, table) = tablename.rpartition(':')
-        if theory == '':
-            return (None, table)
-        return (theory, table)
+    def set_id(self, id):
+        self.id = id
+
+    def set_name(self, name):
+        self.name = name
+
+    def set_comment(self, comment):
+        self.comment = comment
+
+    def set_original_str(self, original_str):
+        self.original_str = original_str
 
     @classmethod
     def create_from_table_tuple(cls, table, tuple):
         """Create Literal from table and tuple.
 
-        TABLE is the tablename.
+        TABLE is a string tablename.
         TUPLE is a python list representing a row, e.g.
         [17, "string", 3.14].  Returns the corresponding Literal.
         """
@@ -321,8 +463,8 @@ class Literal (object):
     def __str__(self):
         s = "{}({})".format(self.tablename(),
                             ", ".join([str(x) for x in self.arguments]))
-        if self.modal is not None:
-            s = "{}[{}]".format(self.modal, s)
+        if self.table.modal is not None:
+            s = "{}[{}]".format(self.table.modal, s)
         if self.negated:
             s = "not " + s
         return s
@@ -335,12 +477,8 @@ class Literal (object):
             return self.SORT_RANK < other.SORT_RANK
         if self.table != other.table:
             return self.table < other.table
-        if self.theory != other.theory:
-            return self.theory < other.theory
         if self.negated != other.negated:
             return self.negated < other.negated
-        if self.modal != other.modal:
-            return self.modal < other.modal
         if len(self.arguments) != len(other.arguments):
             return len(self.arguments) < len(other.arguments)
         return self.arguments < other.arguments
@@ -348,9 +486,7 @@ class Literal (object):
     def __eq__(self, other):
         return (isinstance(other, Literal) and
                 self.table == other.table and
-                self.theory == other.theory and
                 self.negated == other.negated and
-                self.modal == other.modal and
                 len(self.arguments) == len(other.arguments) and
                 all(self.arguments[i] == other.arguments[i]
                     for i in xrange(0, len(self.arguments))))
@@ -359,18 +495,15 @@ class Literal (object):
         return not self == other
 
     def __repr__(self):
-        # Use repr to hash Rule--don't include location
-        return ("Literal(modal={}, theory={}, table={}, arguments={}, "
-                "negated={})").format(
-            repr(self.modal),
-            repr(self.theory),
+        return ("Literal(table={}, arguments={}, negated={})").format(
             repr(self.table),
             "[" + ",".join(repr(arg) for arg in self.arguments) + "]",
             repr(self.negated))
 
     def __hash__(self):
         if self._hash is None:
-            self._hash = hash(('Literal', hash(self.theory), hash(self.table),
+            self._hash = hash(('Literal',
+                               hash(self.table),
                                tuple([hash(a) for a in self.arguments]),
                                hash(self.negated)))
         return self._hash
@@ -434,71 +567,53 @@ class Literal (object):
             return self
 
     def invert_update(self):
-        """Invert the update.
-
-        If end of table name is + or -, return a copy after switching
-        the copy's sign.
-        Does not make a copy if table name does not end in + or -.
-        """
-        if self.table.endswith('+'):
-            suffix = '-'
-        elif self.table.endswith('-'):
-            suffix = '+'
-        else:
-            suffix = None
-
-        if suffix is None:
-            return self
-        else:
-            new = copy.copy(self)
-            new.table = new.table[:-1] + suffix
-            return new
+        return self._modify_table(lambda x: x.invert_update())
 
     def drop_update(self):
-        """Drop the update.
-
-        If end of table name is + or -, return a copy without the sign.
-        If table name does not end in + or -, make no copy.
-        """
-        if self.table.endswith('+') or self.table.endswith('-'):
-            new = copy.copy(self)
-            new.table = new.table[:-1]
-            return new
-        else:
-            return self
+        return self._modify_table(lambda x: x.drop_update())
 
     def make_update(self, is_insert=True):
-        new = copy.copy(self)
-        if is_insert:
-            new.table = new.table + "+"
-        else:
-            new.table = new.table + "-"
-        return new
+        return self._modify_table(lambda x: x.make_update(is_insert=is_insert))
+
+    def _modify_table(self, func):
+        """Apply func to self.table and return a copy that uses the result."""
+        newtable, is_different = func(self.table)
+        if is_different:
+            new = copy.copy(self)
+            new.table = newtable
+            return new
+        return self
 
     def is_update(self):
-        return self.table.endswith('+') or self.table.endswith('-')
+        return self.table.is_update()
 
-    def tablename(self, theory=None):
-        return full_tablename(self.table, self.theory, theory)
+    def is_builtin(self):
+        return congressbuiltin.builtin_registry.is_builtin(self.table,
+                                                           len(self.arguments))
+
+    def tablename(self, default_service=None):
+        return self.table.name(default_service)
 
     def theory_name(self):
-        return self.theory
+        return self.table.service
 
     def drop_theory(self):
         """Destructively sets the theory to None."""
         self._hash = None
-        self.theory = None
+        self.table.drop_service()
         return self
 
 
 @functools.total_ordering
-class Rule (object):
+class Rule(object):
     """Represents a rule, e.g. p(x) :- q(x)."""
 
-    SORT_RANK = 5
-    __slots__ = ['heads', 'head', 'body', 'location', '_hash']
+    SORT_RANK = 6
+    __slots__ = ['heads', 'head', 'body', 'location', '_hash', 'id', 'name',
+                 'comment', 'original_str']
 
-    def __init__(self, head, body, location=None):
+    def __init__(self, head, body, location=None, id=None, name=None,
+                 comment=None, original_str=None):
         # self.head is self.heads[0]
         # Keep self.head around since a rule with multiple
         #   heads is not used by reasoning algorithms.
@@ -512,10 +627,27 @@ class Rule (object):
         self.body = body
         self.location = location
         self._hash = None
+        self.id = id or uuid.uuid4()
+        self.name = name
+        self.comment = comment
+        self.original_str = original_str
 
     def __copy__(self):
-        newone = Rule(self.head, self.body, self.location)
+        newone = Rule(self.head, self.body, self.location, self.id,
+                      self.name, self.comment, self.original_str)
         return newone
+
+    def set_id(self, id):
+        self.id = id
+
+    def set_name(self, name):
+        self.name = name
+
+    def set_comment(self, comment):
+        self.comment = comment
+
+    def set_original_str(self, original_str):
+        self.original_str = original_str
 
     def __str__(self):
         if len(self.body) == 0:
@@ -581,7 +713,7 @@ class Rule (object):
         return self.head.tablename(theory)
 
     def theory_name(self):
-        return self.head.theory
+        return self.head.theory_name()
 
     def drop_theory(self):
         """Destructively sets the theory to None in all heads."""
@@ -590,14 +722,15 @@ class Rule (object):
         self._hash = None
         return self
 
-    def tablenames(self, theory=None, body_only=False):
+    def tablenames(self, theory=None, body_only=False, include_builtin=False):
         """Return all the tablenames occurring in this rule."""
         result = set()
         if not body_only:
             for lit in self.heads:
                 result.add(lit.tablename(theory))
         for lit in self.body:
-            result.add(lit.tablename(theory))
+            if include_builtin or not lit.is_builtin():
+                result.add(lit.tablename(theory))
         return result
 
     def variables(self):
@@ -646,8 +779,7 @@ class Rule (object):
         return new
 
     def is_update(self):
-        return (self.head.table.endswith('+') or
-                self.head.table.endswith('-'))
+        return self.head.is_update()
 
 
 class Event(object):
@@ -682,7 +814,7 @@ class Event(object):
             text, str(self.formula), target)
 
     def lstr(self):
-        return self.__str__() + " with proofs " + iterstr(self.proofs)
+        return self.__str__() + " with proofs " + utility.iterstr(self.proofs)
 
     def __hash__(self):
         return hash("Event(formula={}, proofs={}, insert={}".format(
@@ -695,18 +827,6 @@ class Event(object):
 
     def __ne__(self, other):
         return not self.__eq__(other)
-
-
-def full_tablename(table, theory, default_theory=None):
-    theory = theory or default_theory
-    if theory is None:
-        return table
-    return theory + ":" + table
-
-
-def global_tablename(table, theory, current_theory=None):
-    pieces = [x for x in [current_theory, theory, table] if x is not None]
-    return ":".join(pieces)
 
 
 def formulas_to_string(formulas):
@@ -724,7 +844,7 @@ def formulas_to_string(formulas):
 
 def is_update(x):
     """Returns T iff x is a formula or tablename representing an update."""
-    if isinstance(x, basestring):
+    if isinstance(x, six.string_types):
         return x.endswith('+') or x.endswith('-')
     elif is_atom(x):
         return is_update(x.table)
@@ -740,7 +860,7 @@ def is_result(x):
     Returns T iff x is a formula or tablename representing the result of
     an action invocation.
     """
-    if isinstance(x, basestring):
+    if isinstance(x, six.string_types):
         return x == 'result'
     elif is_atom(x):
         return is_update(x.table)
@@ -784,7 +904,7 @@ def is_stratified(rules):
 class RuleDependencyGraph(utility.BagGraph):
     """A Graph representing the table dependencies of rules.
 
-    Returns a Graph that includes one node for each table and an edge
+    Creates a Graph that includes one node for each table and an edge
     <u,v> if there is some rule with u in the head and v in the body.
     THEORY is the name of the theory to be used for any literal whose
     theory is None.
@@ -804,7 +924,7 @@ class RuleDependencyGraph(utility.BagGraph):
         self.head_to_body = head_to_body
         # dict from modal name to set of tablenames appearing in rule head
         #   with that modal (with refcounts)
-        self.modal_index = ModalIndex()
+        self.modal_index = analysis.ModalIndex()
         # insert formulas
         if formulas:
             for formula in formulas:
@@ -906,22 +1026,25 @@ class RuleDependencyGraph(utility.BagGraph):
         """
         nodes = set()
         edges = set()
-        modals = ModalIndex()
+        modals = analysis.ModalIndex()
+        # TODO(thinrichs): should be able to have global_tablename
+        #   return a Tablename object and therefore build a graph
+        #   of Tablename objects instead of strings.
         if is_atom(formula):
             if include_atoms:
-                table = global_tablename(formula.table, formula.theory, theory)
+                table = formula.table.global_tablename(theory)
                 nodes.add(table)
-                if formula.modal:
-                    modals.add(formula.modal, table)
+                if formula.table.modal:
+                    modals.add(formula.table.modal, table)
         else:
             for head in formula.heads:
                 if select_head is not None and not select_head(head):
                     continue
                 # head computed differently so that if head.theory is non-None
                 #   we end up with theory:head.theory:head.table
-                head_table = global_tablename(head.table, head.theory, theory)
-                if head.modal:
-                    modals.add(head.modal, head_table)
+                head_table = head.table.global_tablename(theory)
+                if head.table.modal:
+                    modals.add(head.table.modal, head_table)
                 nodes.add(head_table)
                 for lit in formula.body:
                     if select_body is not None and not select_body(lit):
@@ -934,6 +1057,85 @@ class RuleDependencyGraph(utility.BagGraph):
                     else:
                         edges.add((lit_table, head_table, lit.is_negated()))
         return (nodes, edges, modals)
+
+    def table_delete(self, table):
+        self.delete_node(table)
+
+    def find_dependencies(self, tables):
+        return self.find_dependent_nodes(tables)
+
+    def find_definitions(self, tables):
+        return self.find_reachable_nodes(tables)
+
+    def tables(self):
+        return set(self.nodes.keys())
+
+
+def find_subpolicy(rules, required_tables, prohibited_tables,
+                   output_tables):
+    """Return a subset of rules pertinent to the parameters.
+
+    :param rules is the collection of Datalog rules to analyze
+    :param required_tables is the set of tablenames that a rule must depend on.
+    :param prohibited_tables is the set of tablenames that a rule must
+           NOT depend on.
+    :param output_tables is the set of tablenames that all rules must support.
+
+    Table R depends on table T if T occurs in the
+    body of a rule with R in the head, or T occurs in the body of a rule
+    where R depends on the table in the head of that rule.
+
+    The subset of RULES chosen has several properties:
+    i) if a chosen rule has table R in the head, then one of @output_tables
+       depends on R
+    ii) if a chosen rule has R in the head, then R does not depend on
+        any of @prohibited_tables
+    iii) if a chosen rule has R in the head, then R depends on at least
+         one of @required_tables.
+    """
+    def filter_output_definitions(rule_permitted):
+        for output_table in output_tables:
+            if output_table in definitions:
+                newset = set()
+                for rule in definitions[output_table]:
+                    if rule_permitted(rule):
+                        newset.add(rule)
+                    else:
+                        graph.formula_delete(rule)
+                definitions[output_table] = newset
+
+    # Create data structures for analysis
+    graph = RuleDependencyGraph(rules)
+    LOG.info("graph: %s", graph)
+    definitions = {}  # maps table name to set of rules that define it
+    for rule in rules:
+        for head in rule.heads:
+            if head.table.table not in definitions:
+                definitions[head.table.table] = set()
+            definitions[head.table.table].add(rule)
+    LOG.info("definitions: %s", definitions)
+
+    # Remove rules dependent on prohibited tables (except output tables)
+    prohibited = graph.find_dependencies(prohibited_tables) - output_tables
+    rule_permitted = lambda rule: all(lit.table.table not in prohibited
+                                      for lit in rule.body)
+    filter_output_definitions(rule_permitted)
+    LOG.info("definitions: %s", definitions)
+
+    # Remove rules for tables not dependent on a required table
+    required = graph.find_dependencies(required_tables)
+    rule_permitted = lambda rule: any(
+        lit.table.table in required for lit in rule.body)
+    filter_output_definitions(rule_permitted)
+    LOG.info("definitions: %s", definitions)
+
+    # Return remaining rules for tables that help define output tables
+    outputs = graph.find_definitions(output_tables)
+    subpolicy = set()
+    for table in outputs:
+        if table in definitions:
+            subpolicy |= definitions[table]
+    return subpolicy
 
 
 def reorder_for_safety(rule):
@@ -971,8 +1173,7 @@ def reorder_for_safety(rule):
         target_vars = None
         if lit.is_negated():
             target_vars = lit.variable_names()
-        elif congressbuiltin.builtin_registry.is_builtin(lit.table,
-                                                         len(lit.arguments)):
+        elif lit.is_builtin():
             builtin = congressbuiltin.builtin_registry.builtin(lit.table)
             target_vars = lit.arguments[0:builtin.num_inputs]
             target_vars = set([x.name for x in target_vars if x.is_variable()])
@@ -991,7 +1192,7 @@ def reorder_for_safety(rule):
     if len(unsafe_literals) > 0:
         lit_msgs = [str(lit) + " (vars " + str(unsafe_variables[lit]) + ")"
                     for lit in unsafe_literals]
-        raise PolicyException(
+        raise exception.PolicyException(
             "Could not reorder rule {}.  Unsafe lits: {}".format(
                 str(rule), "; ".join(lit_msgs)))
     rule.body = new_body
@@ -1006,7 +1207,8 @@ def fact_errors(atom, theories=None, theory=None):
     assert atom.is_atom(), "fact_errors expects an atom"
     errors = []
     if not atom.is_ground():
-        errors.append(PolicyException("Fact not ground: " + str(atom)))
+        errors.append(exception.PolicyException(
+            "Fact not ground: " + str(atom)))
     errors.extend(literal_schema_consistency(atom, theories, theory))
     errors.extend(fact_has_no_theory(atom))
     return errors
@@ -1014,11 +1216,11 @@ def fact_errors(atom, theories=None, theory=None):
 
 def fact_has_no_theory(atom):
     """Checks that ATOM has an empty theory.  Returns exceptions."""
-    if atom.theory is None:
+    if atom.table.service is None:
         return []
-    return [PolicyException(
+    return [exception.PolicyException(
         "Fact {} should not reference any policy: {}".format(
-            str(atom), str(atom.theory)))]
+            str(atom), str(atom.table.service)))]
 
 
 def rule_head_safety(rule):
@@ -1037,7 +1239,7 @@ def rule_head_safety(rule):
         body_vars |= lit.variables()
     unsafe = head_vars - body_vars
     for var in unsafe:
-        errors.append(PolicyException(
+        errors.append(exception.PolicyException(
             "Variable {} found in head but not in body, rule {}".format(
                 str(var), str(rule)),
             obj=var))
@@ -1049,23 +1251,23 @@ def rule_modal_safety(rule):
     errors = []
     modal_in_head = False
     for lit in rule.heads:
-        if lit.modal is not None:
+        if lit.table.modal is not None:
             modal_in_head = True
-            if lit.modal.lower() not in PERMITTED_MODALS:
-                errors.append(PolicyException(
+            if lit.table.modal.lower() not in PERMITTED_MODALS:
+                errors.append(exception.PolicyException(
                     "Only 'execute' modal is allowed; found %s in head %s" % (
-                        lit.modal, lit)))
+                        lit.table.modal, lit)))
 
     if modal_in_head and len(rule.heads) > 1:
-        errors.append(PolicyException(
+        errors.append(exception.PolicyException(
             "May not have multiple rule heads with a modal: %s" % (
                 ", ".join(str(x) for x in rule.heads))))
 
     for lit in rule.body:
-        if lit.modal:
-            errors.append(PolicyException(
+        if lit.table.modal:
+            errors.append(exception.PolicyException(
                 "Modals not allowed in the rule body; "
-                "found %s in body literal %s" % (lit.modal, lit)))
+                "found %s in body literal %s" % (lit.table.modal, lit)))
 
     return errors
 
@@ -1078,10 +1280,10 @@ def rule_head_has_no_theory(rule, permit_head=None):
     """
     errors = []
     for head in rule.heads:
-        if (head.theory is not None and
-            head.modal is None and
+        if (head.table.service is not None and
+            head.table.modal is None and
            (not permit_head or not permit_head(head))):
-            errors.append(PolicyException(
+            errors.append(exception.PolicyException(
                 "Non-modal rule head %s should not reference "
                 "any policy: %s" % (head, rule)))
     return errors
@@ -1098,7 +1300,7 @@ def rule_body_safety(rule):
     try:
         reorder_for_safety(rule)
         return []
-    except PolicyException as e:
+    except exception.PolicyException as e:
         return [e]
 
 
@@ -1117,7 +1319,7 @@ def literal_schema_consistency(literal, theories, theory=None):
         return []
 
     # figure out theory that pertains to this literal
-    active_theory = literal.theory or theory
+    active_theory = literal.table.service or theory
 
     # if current theory is unknown, no violation of schema
     if active_theory is None:
@@ -1134,20 +1336,21 @@ def literal_schema_consistency(literal, theories, theory=None):
         return []
 
     # check if known table
-    if literal.table not in schema:
+    if literal.table.table not in schema:
         if schema.complete:
-            return [PolicyException(
+            return [exception.PolicyException(
                 "Literal {} uses unknown table {} "
                 "from policy {}".format(
-                    str(literal), str(literal.table), str(active_theory)))]
+                    str(literal), str(literal.table.table),
+                    str(active_theory)))]
         else:
             # may not have a declaration for this table's columns
             return []
 
     # check width
-    arity = schema.arity(literal.table)
+    arity = schema.arity(literal.table.table)
     if arity and len(literal.arguments) != arity:
-        return [PolicyException(
+        return [exception.PolicyException(
             "Literal {} contained {} arguments but only "
             "{} arguments are permitted".format(
                 str(literal), len(literal.arguments), arity))]
@@ -1245,11 +1448,7 @@ class Compiler (object):
         self.raise_errors()
 
     def print_parse_result(self):
-        print_tree(
-            self.raw_syntax_tree,
-            lambda x: x.getText(),
-            lambda x: x.children,
-            ind=1)
+        print_antlr(self.raw_syntax_tree)
 
     def sigerr(self, error):
         self.errors.append(error)
@@ -1260,7 +1459,7 @@ class Compiler (object):
     def raise_errors(self):
         if len(self.errors) > 0:
             errors = [str(err) for err in self.errors]
-            raise PolicyException(
+            raise exception.PolicyException(
                 'Compiler found errors:' + '\n'.join(errors))
 
 
@@ -1321,11 +1520,11 @@ class DatalogSyntax(object):
         parser = cls.Parser(tokens)
         result = parser.prog()
         if len(lexer.error_list) > 0:
-            raise PolicyException("Lex failure.\n" +
-                                  "\n".join(lexer.error_list))
+            raise exception.PolicyException("Lex failure.\n" +
+                                            "\n".join(lexer.error_list))
         if len(parser.error_list) > 0:
-            raise PolicyException("Parse failure.\n" +
-                                  "\n".join(parser.error_list))
+            raise exception.PolicyException("Parse failure.\n" +
+                                            "\n".join(parser.error_list))
         return result.tree
 
     def convert_to_congress(self, antlr):
@@ -1333,7 +1532,9 @@ class DatalogSyntax(object):
 
     def create(self, antlr):
         obj = antlr.getText()
-        if obj == 'RULE':
+        if obj == 'EVENT':
+            return self.create_event(antlr)
+        elif obj == 'RULE':
             rule = self.create_rule(antlr)
             return rule
         elif obj == 'NOT':
@@ -1351,16 +1552,31 @@ class DatalogSyntax(object):
         elif obj == '<EOF>':
             return []
         else:
-            raise PolicyException(
+            raise exception.PolicyException(
                 "Antlr tree with unknown root: {}".format(obj))
+
+    def create_event(self, antlr):
+        # (EVENT (MODAL RULE [POLICY]))
+        print_antlr(antlr)
+        modal = antlr.children[0].getText().lower()
+        if modal not in ['insert', 'delete']:
+            raise exception.PolicyException(
+                "Unknown modal operator applied to rule: %s" % modal)
+        rule = self.create(antlr.children[1])
+        isinsert = (modal == 'insert')
+        policy = None
+        if len(antlr.children) > 2:
+            policy = antlr.children[2].getText()
+            policy = policy[1:len(policy) - 1]
+        return Event(formula=rule, insert=isinsert, target=policy)
 
     def create_rule(self, antlr):
         # (RULE (AND1 AND2))
         prefix = self.unused_variable_prefix(antlr)
         heads = self.create_and_literals(antlr.children[0], prefix)
         body = self.create_and_literals(antlr.children[1], prefix)
-        loc = Location(line=antlr.children[0].token.line,
-                       col=antlr.children[0].token.charPositionInLine)
+        loc = utils.Location(line=antlr.children[0].token.line,
+                             col=antlr.children[0].token.charPositionInLine)
         return Rule(heads, body, location=loc)
 
     def create_and_literals(self, antlr, prefix):
@@ -1393,19 +1609,14 @@ class DatalogSyntax(object):
             modal = None
             atom = antlr
         (table, args, loc) = self.create_atom_aux(atom, index, prefix)
-        return Literal(table, args, location=loc, modal=modal,
-                       use_modules=self.use_modules)
+        table.modal = modal
+        return Literal(table, args, location=loc, use_modules=self.use_modules)
 
     def create_atom_aux(self, antlr, index, prefix):
         # (ATOM (TABLENAME ARG1 ... ARGN))
-        table = self.create_structured_name(antlr.children[0])
-        if self.use_modules:
-            theory, tablename = Literal.partition_tablename(table)
-        else:
-            theory = None
-            tablename = table
-        loc = Location(line=antlr.children[0].token.line,
-                       col=antlr.children[0].token.charPositionInLine)
+        table = self.create_tablename(antlr.children[0])
+        loc = utils.Location(line=antlr.children[0].token.line,
+                             col=antlr.children[0].token.charPositionInLine)
 
         # Construct args (without column references)
         has_named_param = any(x for x in antlr.children
@@ -1413,18 +1624,18 @@ class DatalogSyntax(object):
 
         # Find the schema for this table if we know it.
         columns = None
-        if theory in self.theories:
-            schema = self.theories[theory].schema
-            if schema is not None and tablename in schema:
-                columns = schema.columns(tablename)
+        if table.service in self.theories:
+            schema = self.theories[table.service].schema
+            if schema is not None and table.table in schema:
+                columns = schema.columns(table.table)
         # Compute the args, after having converted them to Terms
         args = []
         if columns is None:
             if has_named_param:
-                self.errors.append(PolicyException(
+                self.errors.append(exception.PolicyException(
                     "Atom {} uses named parameters but the columns for "
                     "table {} have not been declared.".format(
-                        self.antlr_atom_str(antlr), table)))
+                        self.antlr_atom_str(antlr), str(table))))
             else:
                 args = [self.create_term(antlr.children[i])
                         for i in xrange(1, len(antlr.children))]
@@ -1462,7 +1673,7 @@ class DatalogSyntax(object):
         for param in reference_args:
             # (NAMED_PARAM (COLUMN_REF TERM))
             if param.getText() != 'NAMED_PARAM':
-                errors.append(PolicyException(
+                errors.append(exception.PolicyException(
                     "Atom {} has a positional parameter after "
                     "a reference parameter".format(
                         atomstr)))
@@ -1470,18 +1681,18 @@ class DatalogSyntax(object):
                 # (COLUMN_NAME (ID))
                 name = param.children[0].children[0].getText()
                 if name in names:
-                    errors.append(PolicyException(
+                    errors.append(exception.PolicyException(
                         "In atom {} two values for column name {} "
                         "were provided".format(atomstr, name)))
                 names[name] = self.create_term(param.children[1])
                 if name not in column_int:
-                    errors.append(PolicyException(
+                    errors.append(exception.PolicyException(
                         "In atom {} column name {} does not exist".format(
                             atomstr, name)))
                 else:
                     number = column_int[name]
                     if number < len(position_args):
-                        errors.append(PolicyException(
+                        errors.append(exception.PolicyException(
                             "In atom {} column name {} references position {},"
                             " which is already provided by position "
                             "arguments.".format(
@@ -1491,17 +1702,17 @@ class DatalogSyntax(object):
                 # Know int() will succeed because of lexer
                 number = int(param.children[0].children[0].getText())
                 if number in numbers:
-                    errors.append(PolicyException(
+                    errors.append(exception.PolicyException(
                         "In atom {} two values for column number {} "
                         "were provided.".format(atomstr, str(number))))
                 numbers[number] = self.create_term(param.children[1])
                 if number < len(position_args):
-                    errors.append(PolicyException(
+                    errors.append(exception.PolicyException(
                         "In atom {} column number {} is already provided by "
                         "position arguments.".format(
                             atomstr, number)))
                 if number >= len(columns):
-                    errors.append(PolicyException(
+                    errors.append(exception.PolicyException(
                         "In atom {} column number {} is too large. The "
                         "permitted column numbers are 0..{} ".format(
                             atomstr, number, len(columns) - 1)))
@@ -1514,7 +1725,7 @@ class DatalogSyntax(object):
             name = names.get(columns[i], None)  # a Term or None
             number = numbers.get(i, None)       # a Term or None
             if name is not None and number is not None:
-                errors.append(PolicyException(
+                errors.append(exception.PolicyException(
                     "In atom {} a column was given two values by reference "
                     "parameters: one by name {} and one by number {}. ".format(
                         atomstr, name, str(number))))
@@ -1532,7 +1743,7 @@ class DatalogSyntax(object):
 
     def antlr_atom_str(self, antlr):
         # (ATOM (TABLENAME ARG1 ... ARGN))
-        table = self.create_structured_name(antlr.children[0])
+        table = self.create_tablename(antlr.children[0])
         argstrs = []
         for i in xrange(1, len(antlr.children)):
             arg = antlr.children[i]
@@ -1543,21 +1754,23 @@ class DatalogSyntax(object):
                 argstrs.append(arg)
             else:
                 arg = arg.children[0].getText()
-        return table + "(" + ",".join(argstrs) + ")"
+        return str(table) + "(" + ",".join(argstrs) + ")"
 
-    def create_structured_name(self, antlr):
+    def create_tablename(self, antlr):
         # (STRUCTURED_NAME (ARG1 ... ARGN))
         if antlr.children[-1].getText() in ['+', '-']:
-            return (":".join([x.getText() for x in antlr.children[:-1]]) +
-                    antlr.children[-1].getText())
+            table = (":".join([x.getText() for x in antlr.children[:-1]]) +
+                     antlr.children[-1].getText())
         else:
-            return ":".join([x.getText() for x in antlr.children])
+            table = ":".join([x.getText() for x in antlr.children])
+        return Tablename.create_from_tablename(
+            table, use_modules=self.use_modules)
 
     def create_term(self, antlr):
         # (TYPE (VALUE))
         op = antlr.getText()
-        loc = Location(line=antlr.children[0].token.line,
-                       col=antlr.children[0].token.charPositionInLine)
+        loc = utils.Location(line=antlr.children[0].token.line,
+                             col=antlr.children[0].token.charPositionInLine)
         if op == 'STRING_OBJ':
             value = antlr.children[0].getText()
             return ObjectConstant(value[1:len(value) - 1],  # prune quotes
@@ -1574,7 +1787,8 @@ class DatalogSyntax(object):
         elif op == 'VARIABLE':
             return Variable(self.variable_name(antlr), location=loc)
         else:
-            raise PolicyException("Unknown term operator: {}".format(op))
+            raise exception.PolicyException(
+                "Unknown term operator: {}".format(op))
 
     def unused_variable_prefix(self, antlr_rule):
         """Get unused variable prefix.
@@ -1637,6 +1851,15 @@ class DatalogSyntax(object):
         return "".join([child.getText() for child in antlr.children])
 
 
+def print_antlr(tree):
+    """Print an antlr Tree."""
+    print_tree(
+        tree,
+        lambda x: x.getText(),
+        lambda x: x.children,
+        ind=1)
+
+
 def print_tree(tree, text, kids, ind=0):
     """Helper function for printing.
 
@@ -1644,7 +1867,7 @@ def print_tree(tree, text, kids, ind=0):
     function KIDS to compute the children of a given node.
     IND is a number representing the indentation level.
     """
-    print("|" * ind)
+    print("|" * ind),
     print("{}".format(str(text(tree))))
     children = kids(tree)
     if children:

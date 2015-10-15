@@ -35,6 +35,7 @@ tokens {
     STRUCTURED_NAME;
 
     // Kinds of Formulas
+    EVENT;
     RULE;
     LITERAL;
     MODAL;
@@ -53,23 +54,47 @@ tokens {
     SYMBOL_OBJ;
 }
 
+// a program can be one or more statements or empty
 prog
-    : formula formula* EOF -> ^(THEORY formula+)
+    : statement+ EOF -> ^(THEORY statement+)
     | EOF
     ;
 
+// a statement is either a formula or a comment
+// let the lexer handle comments directly for efficiency
+statement
+    : formula formula_terminator? -> formula
+    | COMMENT
+    ;
+
 formula
-    : bare_formula formula_terminator? -> bare_formula
+    : rule
+    | fact
+    | event
+    ;
+
+// An Event represents the insertion/deletion of policy statements.
+// Events always include :-.  This is to avoid ambiguity in the grammar
+//   for the case of insert[p(1)].  Without the requirement that an event
+//   includes a :-, insert[p(1)] could either represent the event where p(1)
+//   is inserted or simply a policy statement with an empty body and the modal
+//   'insert' in the head.
+//   This means that to represent the event where p(1) is inserted, you must write
+//   insert[p(1) :- true].  To represent the query that asks if insert[p(1)] is true
+//   you write insert[p(1)].
+
+event
+    : event_op LBRACKET rule (formula_terminator STRING)? RBRACKET -> ^(EVENT event_op rule STRING?)
+    ;
+
+event_op
+    : 'insert'
+    | 'delete'
     ;
 
 formula_terminator
     : ';'
     | '.'
-    ;
-
-bare_formula
-    : rule
-    | modal
     ;
 
 rule
@@ -81,19 +106,21 @@ literal_list
     ;
 
 literal
-    : modal           -> modal
-    | NEGATION modal  -> ^(NOT modal)
+    : fact            -> fact
+    | NEGATION fact   -> ^(NOT fact)
     ;
 
-NEGATION
-    : 'not'
-    | 'NOT'
-    | '!'
-    ;
-
-modal
+// Note: if we replace modal_op with ID, it tries to force statements
+//  like insert[p(x)] :- q(x) to be events instead of rules.  Bug?
+fact
     : atom
-    | ID LBRACKET atom RBRACKET -> ^(MODAL ID atom)
+    | modal_op LBRACKET atom RBRACKET -> ^(MODAL modal_op atom)
+    ;
+
+modal_op
+    : 'execute'
+    | 'insert'
+    | 'delete'
     ;
 
 atom
@@ -133,6 +160,15 @@ relation_constant
     : ID (':' ID)* SIGN? -> ^(STRUCTURED_NAME ID+ SIGN?)
     ;
 
+// start of the lexer
+// first, define keywords to ensure they have lexical priority
+
+NEGATION
+    : 'not'
+    | 'NOT'
+    | '!'
+    ;
+
 EQUAL
     :  '='
     ;
@@ -165,7 +201,7 @@ FLOAT
 // Python strings:
 // - can be enclosed in matching single quotes (') or double quotes (")
 // - can be enclosed in matching groups of three single or double quotes
-// - a backslash (\) character is used to escape characters that otherwise 
+// - a backslash (\) character is used to escape characters that otherwise
 //   have a special meaning (e.g., newline, backslash, or a quote)
 // - can be prefixed with a u to simplify maintenance of 2.x and 3.x code
 // - 'ur' is NOT allowed

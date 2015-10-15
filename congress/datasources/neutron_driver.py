@@ -13,10 +13,10 @@
 #    under the License.
 #
 import neutronclient.v2_0.client
+from oslo_log import log as logging
 
 from congress.datasources import datasource_driver
 from congress.datasources import datasource_utils
-from congress.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -26,7 +26,9 @@ def d6service(name, keys, inbox, datapath, args):
     return NeutronDriver(name, keys, inbox, datapath, args)
 
 
-class NeutronDriver(datasource_driver.DataSourceDriver):
+class NeutronDriver(datasource_driver.DataSourceDriver,
+                    datasource_driver.ExecutionDriver):
+
     NETWORKS = "networks"
     NETWORKS_SUBNETS = "networks.subnets"
     PORTS = "ports"
@@ -158,6 +160,7 @@ class NeutronDriver(datasource_driver.DataSourceDriver):
 
     def __init__(self, name='', keys='', inbox=None, datapath=None, args=None):
         super(NeutronDriver, self).__init__(name, keys, inbox, datapath, args)
+        datasource_driver.ExecutionDriver.__init__(self)
         self.creds = self.get_neutron_credentials(args)
         self.neutron = neutronclient.v2_0.client.Client(**self.creds)
 
@@ -167,7 +170,7 @@ class NeutronDriver(datasource_driver.DataSourceDriver):
         #   UUIDs), it's hard to tell if no changes occurred
         #   after performing the translation.
         self.raw_state = {}
-        self.initialized = True
+        self._init_end_start_poll()
 
     @staticmethod
     def get_datasource_info():
@@ -296,6 +299,14 @@ class NeutronDriver(datasource_driver.DataSourceDriver):
         for table in security_group_tables:
             LOG.debug('%s: %s', table, self.state[table])
 
+    def execute(self, action, action_args):
+        """Overwrite ExecutionDriver.execute()."""
+        # action can be written as a method or an API call.
+        func = getattr(self, action, None)
+        if func and self.is_executable(func):
+            func(action_args)
+        else:
+            self._execute_api(self.neutron, action, action_args)
 
 # Sample Mapping
 # Network :
