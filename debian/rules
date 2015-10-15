@@ -30,6 +30,7 @@ override_dh_install:
 		--namespace oslo.policy \
 		--namespace oslo.db \
 		--namespace keystonemiddleware.auth_token
+	sed -i 's/[ \t#]*auth_protocol[ \t]*=.*/auth_protocol = http/' $(CURDIR)/debian/congress-common/usr/share/congress-common/congress.conf
 	install -D -m 0644 $(CURDIR)/etc/api-paste.ini $(CURDIR)/debian/congress-common/usr/share/congress-common/api-paste.ini
 	install -D -m 0644 $(CURDIR)/etc/policy.json $(CURDIR)/debian/congress-common/usr/share/congress-common/policy.json
 	cp congress/db/migration/alembic.ini $(CURDIR)/debian/python-congress/usr/lib/python2.7/dist-packages/congress/db/migration/
