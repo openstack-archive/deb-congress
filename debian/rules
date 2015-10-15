@@ -22,7 +22,14 @@ override_dh_clean:
 override_dh_install:
 	dh_install --fail-missing
 
-	install -D -m 0644 $(CURDIR)/etc/congress.conf.sample $(CURDIR)/debian/congress-common/usr/share/congress-common/congress.conf
+	mkdir -p $(CURDIR)/debian/congress-common/usr/share/congress-common
+	PYTHONPATH=. oslo-config-generator --output-file $(CURDIR)/debian/congress-common/usr/share/congress-common/congress.conf \
+		--wrap-width 79 \
+		--namespace congress \
+		--namespace oslo.log \
+		--namespace oslo.policy \
+		--namespace oslo.db \
+		--namespace keystonemiddleware.auth_token
 	install -D -m 0644 $(CURDIR)/etc/api-paste.ini $(CURDIR)/debian/congress-common/usr/share/congress-common/api-paste.ini
 	install -D -m 0644 $(CURDIR)/etc/policy.json $(CURDIR)/debian/congress-common/usr/share/congress-common/policy.json
 
