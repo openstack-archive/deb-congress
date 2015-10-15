@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: congress\n"
 "Report-Msgid-Bugs-To: congress@packages.debian.org\n"
-"POT-Creation-Date: 2015-10-15 11:26+0000\n"
+"POT-Creation-Date: 2015-10-15 11:37+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -121,4 +121,91 @@ msgstr ""
 msgid ""
 "You can change this setting later on by running \"dpkg-reconfigure -plow "
 "congress-common\"."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../congress-server.templates:2001
+msgid "Register Congress in the Keystone endpoint catalog?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../congress-server.templates:2001
+msgid ""
+"Each OpenStack service (each API) should be registered in order to be "
+"accessible. This is done using \"keystone service-create\" and \"keystone "
+"endpoint-create\". This can be done automatically now."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../congress-server.templates:2001
+msgid ""
+"Note that you will need to have an up and running Keystone server on which "
+"to connect using the Keystone authentication token."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:3001
+msgid "Keystone server IP address:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:3001
+msgid ""
+"Please enter the IP address of the Keystone server, so that congress-server "
+"can contact Keystone to do the Congress service and endpoint creation."
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../congress-server.templates:4001
+msgid "Keystone authentication token:"
+msgstr ""
+
+#. Type: password
+#. Description
+#: ../congress-server.templates:4001
+msgid ""
+"To configure its endpoint in Keystone, congress-server needs the Keystone "
+"authentication token."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:5001
+msgid "Congress endpoint IP address:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:5001
+msgid "Please enter the IP address that will be used to contact Congress."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:5001
+msgid ""
+"This IP address should be accessible from the clients that will use this "
+"service, so if you are installing a public cloud, this should be a public IP "
+"address."
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:6001
+msgid "Name of the region to register:"
+msgstr ""
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:6001
+msgid ""
+"OpenStack supports using availability zones, with each region representing a "
+"location. Please enter the zone that you wish to use when registering the "
+"endpoint."
 msgstr ""
