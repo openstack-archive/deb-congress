@@ -27,8 +27,8 @@ if [ "$1" = "configure" ] || [ "$1" = "reconfigure" ] ; then
 
 	db_get congress/configure_db
 	if [ "$RET" = "true" ]; then
-		echo "Now calling congress-db-manage sync: this may take a while..."
-		su -s /bin/sh -c 'congress-db-manage sync' congress
+		echo "Now calling congress-db-manage --config-file /etc/congress/congress.conf upgrade head: this may take a while..."
+		su -s /bin/sh -c 'congress-db-manage --config-file /etc/congress/congress.conf upgrade head' congress
 	fi
 	db_stop
 fi
