@@ -32,6 +32,7 @@ override_dh_install:
 		--namespace keystonemiddleware.auth_token
 	install -D -m 0644 $(CURDIR)/etc/api-paste.ini $(CURDIR)/debian/congress-common/usr/share/congress-common/api-paste.ini
 	install -D -m 0644 $(CURDIR)/etc/policy.json $(CURDIR)/debian/congress-common/usr/share/congress-common/policy.json
+	cp congress/db/migration/alembic.ini $(CURDIR)/debian/python-congress/usr/lib/python2.7/dist-packages/congress/db/migration/
 
 override_dh_auto_build:
 	set -e && for pyvers in $(PYTHONS); do \

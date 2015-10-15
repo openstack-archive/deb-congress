@@ -1,5 +1,5 @@
 congress (2.0.0~rc2-1) unstable; urgency=medium
 
-  * Initial release. (Closes: #XXXXXX)
+  * Initial release. (Closes: #801863)
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 22 May 2015 00:22:01 +0200
