@@ -1,0 +1,3 @@
+extend-diff-ignore = "^[^/]*[.]egg-info/"
+extend-diff-ignore = "^congress/datalog/CongressParser.py"
+extend-diff-ignore = "^congress/datalog/CongressLexer.py"
