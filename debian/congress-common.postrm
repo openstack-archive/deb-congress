@@ -1,0 +1,31 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "purge" ] && [ -f /usr/share/debconf/confmodule ] ; then
+	if [ -f /usr/share/debconf/confmodule ] ; then
+		. /usr/share/debconf/confmodule
+
+		db_get congress/configure_db || true
+		if [ "$RET" = "true" ]; then
+			if [ -f /usr/share/dbconfig-common/dpkg/postrm ]; then
+				. /usr/share/dbconfig-common/dpkg/postrm
+				dbc_go congress-common $@
+			else
+				rm -f /etc/dbconfig-common/congress-common.conf
+				if which ucf >/dev/null 2>&1; then
+					ucf --purge /etc/dbconfig-common/congress-common.conf
+					ucfr --purge congress-common /etc/dbconfig-common/congress-common.conf
+				fi
+			fi
+		fi
+	fi
+
+	rm -f /etc/congress/congress.conf /etc/congress/api-paste.ini /etc/congress/policy.json
+	[ -d /etc/congress ] && rmdir --ignore-fail-on-non-empty /etc/congress || true
+	rm -rf /var/lib/congress /var/log/congress
+fi
+
+#DEBHELPER#
+
+exit 0
