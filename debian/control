@@ -55,6 +55,7 @@ Build-Depends-Indep: alembic (>= 0.8.0),
                      python-webob,
                      subunit,
                      testrepository,
+Standards-Version: 3.9.6
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/congress.git;a=summary
 Vcs-Git: git://anonscm.debian.org/openstack/congress.git
 Homepage: http://congress.openstack.org/
