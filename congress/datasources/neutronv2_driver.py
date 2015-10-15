@@ -229,20 +229,6 @@ class NeutronV2Driver(datasource_driver.DataSourceDriver,
         self.inspect_builtin_methods(self.neutron, 'neutronclient.v2_0.client')
         self._init_end_start_poll()
 
-    def _initialize_tables(self):
-        self.state['networks'] = set()
-        self.state['ports'] = set()
-        self.state['fixed_ips'] = set()
-        self.state['security_group_port_bindings'] = set()
-        self.state['subnets'] = set()
-        self.state['host_routes'] = set()
-        self.state['dns_nameservers'] = set()
-        self.state['allocation_pools'] = set()
-        self.state['routers'] = set()
-        self.state['external_gateway_infos'] = set()
-        self.state['security_groups'] = set()
-        self.state['security_group_rules'] = set()
-
     @staticmethod
     def get_datasource_info():
         result = {}
