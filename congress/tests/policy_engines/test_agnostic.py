@@ -132,21 +132,21 @@ class TestRuntime(base.TestCase):
         # policy types
         run = agnostic.Runtime()
         run.create_policy('test1', kind=datalog_base.NONRECURSIVE_POLICY_TYPE)
-        self.assertTrue(isinstance(run.policy_object('test1'),
-                        nonrecursive.NonrecursiveRuleTheory),
-                        'Nonrecursive policy addition')
+        self.assertIsInstance(run.policy_object('test1'),
+                              nonrecursive.NonrecursiveRuleTheory,
+                              'Nonrecursive policy addition')
         run.create_policy('test2', kind=datalog_base.ACTION_POLICY_TYPE)
-        self.assertTrue(isinstance(run.policy_object('test2'),
-                        nonrecursive.ActionTheory),
-                        'Action policy addition')
+        self.assertIsInstance(run.policy_object('test2'),
+                              nonrecursive.ActionTheory,
+                              'Action policy addition')
         run.create_policy('test3', kind=datalog_base.DATABASE_POLICY_TYPE)
-        self.assertTrue(isinstance(run.policy_object('test3'),
-                        database.Database),
-                        'Database policy addition')
+        self.assertIsInstance(run.policy_object('test3'),
+                              database.Database,
+                              'Database policy addition')
         run.create_policy('test4', kind=datalog_base.MATERIALIZED_POLICY_TYPE)
-        self.assertTrue(isinstance(run.policy_object('test4'),
-                        materialized.MaterializedViewTheory),
-                        'Materialized policy addition')
+        self.assertIsInstance(run.policy_object('test4'),
+                              materialized.MaterializedViewTheory,
+                              'Materialized policy addition')
 
     def test_policy_errors(self):
         """Test errors for multiple policies."""
@@ -165,11 +165,33 @@ class TestRuntime(base.TestCase):
         run.insert('q(1,1)')
         # run query first to build index
         self.assertTrue(helper.datalog_equal(run.select('p(x)'), 'p(1)'))
-        # next insert causes an exceptionsince the thing we indexed on
+        # next insert causes an exceptions since the thing we indexed on
         #   doesn't exist
-        self.assertRaises(IndexError, run.insert, 'q(5)')
+        permitted, errs = run.insert('q(5)')
+        self.assertFalse(permitted)
+        self.assertEqual(len(errs), 1)
+        self.assertIsInstance(errs[0], exception.PolicyException)
         # double-check that the error didn't result in an inconsistent state
         self.assertEqual(run.select('q(5)'), '')
+
+    def test_get_tablename(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.insert('p(x) :- q(x,y)')
+        run.insert('q(x,y) :- r(x,y)')
+        run.insert('t(x) :- q(x,y), r(x,z), equal(y, z)')
+        run.insert('execute[nova:disconnect(x, y)] :- s(x, y)')
+        tables = run.get_tablename('test', 'p')
+        self.assertEqual({'p'}, set(tables))
+
+        tables = run.get_tablename('test', 't')
+        self.assertIsNone(tables)
+
+        tables = run.get_tablenames('test')
+        self.assertEqual({'p', 'q', 'r', 's'}, set(tables))
+
+        tables = run.get_tablename('test', 'nova:disconnect')
+        self.assertIsNone(tables)
 
     def test_tablenames(self):
         run = agnostic.Runtime()
@@ -179,14 +201,44 @@ class TestRuntime(base.TestCase):
         run.insert('t(x) :- q(x,y), r(x,z), equal(y, z)')
         run.insert('execute[nova:disconnect(x, y)] :- s(x, y)')
         tables = run.tablenames()
-        self.assertEqual(
-            set(tables), set(['p', 'q', 'r', 's', 't', 'nova:disconnect']))
+        self.assertEqual({'p', 'q', 'r', 's', 't', 'nova:disconnect'},
+                         set(tables))
         tables = run.tablenames(include_builtin=True)
-        self.assertEqual(
-            set(tables),
-            set(['p', 'q', 'r', 's', 't', 'nova:disconnect', 'equal']))
+        self.assertEqual({'p', 'q', 'r', 's', 't', 'nova:disconnect', 'equal'},
+                         set(tables))
         tables = run.tablenames(body_only=True)
-        self.assertEqual(set(tables), set(['q', 'r', 's']))
+        self.assertEqual({'q', 'r', 's'}, set(tables))
+        tables = run.tablenames(include_modal=False)
+        self.assertEqual({'p', 'q', 'r', 's', 't'}, set(tables))
+
+    @mock.patch.object(db_policy_rules, 'add_policy', side_effect=Exception())
+    def test_persistent_create_policy_with_db_exception(self, mock_add):
+        run = agnostic.Runtime()
+        with mock.patch.object(run, 'delete_policy') as mock_delete:
+            policy_name = 'test_policy'
+            self.assertRaises(exception.PolicyException,
+                              run.persistent_create_policy,
+                              policy_name)
+            mock_add.assert_called_once_with(mock.ANY,
+                                             policy_name,
+                                             policy_name[:5],
+                                             mock.ANY,
+                                             'user',
+                                             'nonrecursive')
+            mock_delete.assert_called_once_with(policy_name)
+
+    def test_tablenames_theory_name(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.create_policy('test2')
+        run.insert('p(x) :- q(x)', 'test')
+        run.insert('r(x) :- s(x)', 'test2')
+
+        tables = run.tablenames()
+        self.assertEqual(set(tables), set(['p', 'q', 'r', 's']))
+
+        tables = run.tablenames(theory_name='test')
+        self.assertEqual(set(tables), set(['p', 'q']))
 
     @mock.patch.object(db_policy_rules, 'add_policy', side_effect=Exception())
     def test_persistent_create_policy_with_db_exception(self, mock_add):
@@ -212,8 +264,8 @@ class TestArity(base.TestCase):
         run.create_policy('bob')
         run.insert('p(x) :- q(x, y)', 'alice')
         run.insert('p(x, y) :- r(x, y, z)', 'bob')
-        self.assertEqual(run.arity('p', 'alice'), 1)
-        self.assertEqual(run.arity('p', 'bob'), 2)
+        self.assertEqual(1, run.arity('p', 'alice'))
+        self.assertEqual(2, run.arity('p', 'bob'))
 
     def test_complex_table(self):
         run = agnostic.Runtime()
@@ -221,14 +273,14 @@ class TestArity(base.TestCase):
         run.create_policy('bob')
         run.insert('p(x) :- q(x, y)', 'alice')
         run.insert('p(x, y) :- r(x, y, z)', 'bob')
-        self.assertEqual(run.arity('alice:p', 'bob'), 1)
-        self.assertEqual(run.arity('alice:p', 'alice'), 1)
+        self.assertEqual(1, run.arity('alice:p', 'bob'))
+        self.assertEqual(1, run.arity('alice:p', 'alice'))
 
     def test_modals(self):
         run = agnostic.Runtime()
         run.create_policy('alice')
         run.insert('execute[nova:p(x)] :- q(x, y)', 'alice')
-        self.assertEqual(run.arity('nova:p', 'alice', 'execute'), 1)
+        self.assertEqual(1, run.arity('nova:p', 'alice', 'execute'))
 
 
 class TestTriggerRegistry(base.TestCase):
@@ -247,15 +299,15 @@ class TestTriggerRegistry(base.TestCase):
         s.add(trigger2)
         s.add(trigger3)
         s.add(trigger4)
-        self.assertEqual(len(s), 4)
+        self.assertEqual(4, len(s))
         s.discard(trigger1)
-        self.assertEqual(len(s), 3)
+        self.assertEqual(3, len(s))
         s.discard(trigger2)
-        self.assertEqual(len(s), 2)
+        self.assertEqual(2, len(s))
         s.discard(trigger3)
-        self.assertEqual(len(s), 1)
+        self.assertEqual(1, len(s))
         s.discard(trigger4)
-        self.assertEqual(len(s), 0)
+        self.assertEqual(0, len(s))
 
     def test_register(self):
         g = compile.RuleDependencyGraph()
@@ -440,7 +492,7 @@ class TestTriggers(base.TestCase):
         run.create_policy('test')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('p(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_empty2(self):
         obj = self.MyObject()
@@ -449,7 +501,7 @@ class TestTriggers(base.TestCase):
         run.insert('p(1)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.delete('p(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_empty3(self):
         obj = self.MyObject()
@@ -459,7 +511,7 @@ class TestTriggers(base.TestCase):
         run.delete('p(1)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.delete('p(1)')
-        self.assertEqual(obj.value, 0)
+        self.assertEqual(0, obj.value)
 
     def test_nochange(self):
         obj = self.MyObject()
@@ -468,7 +520,7 @@ class TestTriggers(base.TestCase):
         run.insert('p(1)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('p(1)')
-        self.assertEqual(obj.value, 0)
+        self.assertEqual(0, obj.value)
 
     def test_batch_change(self):
         obj = self.MyObject()
@@ -479,7 +531,7 @@ class TestTriggers(base.TestCase):
         result = run.update([compile.Event(p1, target='test')])
         self.assertTrue(result[0], ("Update failed with errors: " +
                                     ";".join(str(x) for x in result[1])))
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_dependency(self):
         obj = self.MyObject()
@@ -488,7 +540,7 @@ class TestTriggers(base.TestCase):
         run.insert('p(x) :- q(x)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('q(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_dependency_batch_insert(self):
         obj = self.MyObject()
@@ -496,7 +548,7 @@ class TestTriggers(base.TestCase):
         run.create_policy('test')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('q(1)   p(x) :- q(x)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_dependency_batch(self):
         obj = self.MyObject()
@@ -508,7 +560,7 @@ class TestTriggers(base.TestCase):
         data = compile.parse1('r(1)')
         run.update([compile.Event(rule, target='test'),
                     compile.Event(data, target='test')])
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_dependency_batch_delete(self):
         obj = self.MyObject()
@@ -519,7 +571,7 @@ class TestTriggers(base.TestCase):
         run.insert('r(1)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.delete('q(x) :- r(x)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_multi_dependency(self):
         obj = self.MyObject()
@@ -530,7 +582,7 @@ class TestTriggers(base.TestCase):
         run.insert('s(1)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('r(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_negation(self):
         obj = self.MyObject()
@@ -542,10 +594,10 @@ class TestTriggers(base.TestCase):
         run.insert('r(2)')
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('r(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.delete('r(1)')
-        self.assertEqual(obj.value, 3)
+        self.assertEqual(3, obj.value)
 
     def test_anti_dependency(self):
         obj = self.MyObject()
@@ -555,7 +607,7 @@ class TestTriggers(base.TestCase):
         run.insert('r(1)')
         run.register_trigger('r', lambda tbl, old, new: obj.increment())
         run.insert('q(1)')
-        self.assertEqual(obj.value, 0)
+        self.assertEqual(0, obj.value)
 
     def test_old_new_correctness(self):
         obj = self.MyObject()
@@ -572,7 +624,7 @@ class TestTriggers(base.TestCase):
                              obj.equal(oldp, newp, old, new))
         run.update([compile.Event(compile.parse1('s(3)')),
                     compile.Event(compile.parse1('s(2)'), insert=False)])
-        self.assertEqual(obj.equals, True)
+        self.assertTrue(obj.equals)
 
     def test_unregister(self):
         obj = self.MyObject()
@@ -581,13 +633,13 @@ class TestTriggers(base.TestCase):
         trigger = run.register_trigger('p',
                                        lambda tbl, old, new: obj.increment())
         run.insert('p(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         run.unregister_trigger(trigger)
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         run.insert('p(2)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         self.assertRaises(KeyError, run.unregister_trigger, trigger)
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_sequence(self):
         obj = self.MyObject()
@@ -596,7 +648,7 @@ class TestTriggers(base.TestCase):
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('p(x) :- q(x)')
         run.insert('q(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
 
     def test_delete_data(self):
         obj = self.MyObject()
@@ -605,9 +657,9 @@ class TestTriggers(base.TestCase):
         run.register_trigger('p', lambda tbl, old, new: obj.increment())
         run.insert('p(x) :- q(x, y), equal(y, 1)')
         run.insert('q(1, 1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         run.delete('q(1, 1)')
-        self.assertEqual(obj.value, 2)
+        self.assertEqual(2, obj.value)
 
     def test_multi_policies(self):
         obj = self.MyObject()
@@ -619,9 +671,9 @@ class TestTriggers(base.TestCase):
                              lambda tbl, old, new: obj.increment(), 'alice')
         run.insert('p(x) :- bob:q(x)', target='alice')
         run.insert('q(1)', target='bob')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         run.delete('q(1)', target='bob')
-        self.assertEqual(obj.value, 2)
+        self.assertEqual(2, obj.value)
 
     def test_modal(self):
         obj = self.MyObject()
@@ -631,11 +683,11 @@ class TestTriggers(base.TestCase):
         run.register_trigger('p', lambda tbl, old, new:
                              obj.increment(), 'alice', 'execute')
         run.insert('execute[p(x)] :- q(x)')
-        self.assertEqual(obj.value, 0)
+        self.assertEqual(0, obj.value)
         run.insert('q(1)')
-        self.assertEqual(obj.value, 1)
+        self.assertEqual(1, obj.value)
         run.insert('q(2)')
-        self.assertEqual(obj.value, 2)
+        self.assertEqual(2, obj.value)
 
     def test_initialize(self):
         obj = self.MyObject()
@@ -661,8 +713,8 @@ class TestMultipolicyRules(base.TestCase):
         run.create_policy('test2')
         run.insert('p(x) :- test1:q(x)', target='test2')
         actual = run.select('p(x)', target='test2')
-        e = helper.db_equal(actual, 'p(1) p(2)')
-        self.assertTrue(e, "Basic")
+        e = helper.db_equal('p(1) p(2)', actual)
+        self.assertTrue("Basic", e)
 
     def test_multi_external(self):
         """Test multiple rules that span multiple policies."""
@@ -677,7 +729,7 @@ class TestMultipolicyRules(base.TestCase):
         run.insert('p(2)', target='test3')
         actual = run.select('p(x)', target='test1')
         e = helper.db_equal(actual, 'p(1) p(2)')
-        self.assertTrue(e, "Multiple external rules with multiple policies")
+        self.assertTrue("Multiple external rules with multiple policies", e)
 
     def test_external_current(self):
         """Test ability to write rules that span multiple policies."""
@@ -692,7 +744,7 @@ class TestMultipolicyRules(base.TestCase):
         run.insert('r(2)', target='test2')
         actual = run.select('p(x)', target='test2')
         e = helper.db_equal(actual, 'p(1) p(2)')
-        self.assertTrue(e, "Mixing external theories with current theory")
+        self.assertTrue("Mixing external theories with current theory", e)
 
     def test_ignore_local(self):
         """Test ability to write rules that span multiple policies."""
@@ -709,7 +761,7 @@ class TestMultipolicyRules(base.TestCase):
         run.insert('r(3)', target='test2')
         actual = run.select('p(x)', target='test2')
         e = helper.db_equal(actual, 'p(1) p(2)')
-        self.assertTrue(e, "Local table ignored")
+        self.assertTrue("Local table ignored", e)
 
     def test_local(self):
         """Test ability to write rules that span multiple policies."""
@@ -723,7 +775,7 @@ class TestMultipolicyRules(base.TestCase):
         run.insert('q(2)', 'test2')
         actual = run.select('p(x)', target='test2')
         e = helper.db_equal(actual, 'p(2)')
-        self.assertTrue(e, "Local table used")
+        self.assertTrue("Local table used", e)
 
     def test_multiple_external(self):
         """Test ability to write rules that span multiple policies."""
@@ -902,6 +954,35 @@ class TestMultipolicyRules(base.TestCase):
         run.insert('r(1)', 'sigma')
         run.insert('r(3)', 'sigma')
         self.assertEqual(run.select('p(x1,x2)', 'alpha'), 'p(1, 3)')
+
+    def test_schema_check(self):
+        """Test that schema check in multiple policies works."""
+        run = agnostic.Runtime()
+        run.debug_mode()
+        run.create_policy('alpha')
+        run.create_policy('beta')
+        run.insert('p(x,y) :- beta:q(x,y)', 'alpha')
+        permitted, changes = run.insert('q(x) :- r(x)', 'beta')
+        self.assertFalse(permitted)
+        self.assertEqual(len(changes), 1)
+
+    def test_same_rules(self):
+        """Test that same rule insertion can be correctly dealt with."""
+        run = agnostic.Runtime()
+        run.debug_mode()
+        policy = 'alpha'
+        run.create_policy(policy)
+        rulestr = 'p(x,y) :- q(x,y)'
+        rule = compile.parse1(rulestr)
+        run.insert(rulestr, policy)
+        self.assertTrue(rule in run.policy_object(policy))
+        self.assertTrue(
+            rule.head.table.table in run.policy_object(policy).schema)
+        run.insert(rulestr, policy)
+        run.delete(rulestr, policy)
+        self.assertFalse(rule in run.policy_object(policy))
+        self.assertFalse(
+            rule.head.table.table in run.policy_object(policy).schema)
 
 
 class TestSelect(base.TestCase):
@@ -1427,7 +1508,7 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "No action logged")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
         run.insert('q(1)')
-        self.assertEqual(len(run.logger.messages), 1, "Delete failure")
+        self.assertEqual(len(run.logger.messages), 1, "Improper action logged")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
         expected_args = ('test', 'p')
@@ -1457,7 +1538,7 @@ class TestActionExecution(base.TestCase):
         self.assertEqual(len(run.logger.messages), 1, "No action logged")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
         run.insert('r(1)')
-        self.assertEqual(len(run.logger.messages), 1, "Delete failure")
+        self.assertEqual(len(run.logger.messages), 1, "Improper action logged")
         self.assertEqual(run.logger.messages[0], 'Executing test:p(1)')
 
         expected_args = ('test', 'p')
@@ -1515,6 +1596,172 @@ class TestActionExecution(base.TestCase):
 
         run.execute_action(service_name, action, action_args)
         self.assertFalse(run.request.called)
+
+
+class TestDisabledRules(base.TestCase):
+    """Tests for Runtime's ability to enable/disable rules."""
+    # insertions
+    def test_insert_enabled(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        run.set_schema('test', schema)
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x)')
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 1)
+
+    def test_insert_disabled(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x)')
+        self.assertEqual(len(run.disabled_events), 1)
+        self.assertEqual(len(obj.content()), 0)
+
+    def test_insert_errors(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        schema = compile.Schema({'q': ('name', 'status')})
+        run.set_schema('test', schema)
+        obj = run.policy_object('test')
+        permitted, errors = run.insert('p(x) :- q(id=x)')
+        self.assertFalse(permitted)
+        errstring = " ".join(str(x) for x in errors)
+        self.assertTrue("column name id does not exist" in errstring)
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 0)
+
+    def test_insert_set_schema_disabled(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x)')   # rule is disabled
+        self.assertEqual(len(run.disabled_events), 1)
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        run.set_schema('test', schema)
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 1)
+
+    def test_insert_set_schema_disabled_multiple(self):
+        # insert rule that gets disabled
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.create_policy('nova')
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x), nova:r(id=x)', 'test')
+        self.assertEqual(len(run.disabled_events), 1)
+        # set first schema
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        run.set_schema('test', schema)
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 1)
+        self.assertEqual(len(obj.content()), 0)
+        # set second schema
+        schema = compile.Schema({'r': ('id', 'name', 'status')})
+        run.set_schema('nova', schema)
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 1)
+
+    def test_insert_set_schema_errors(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x)')   # rule is disabled
+        self.assertEqual(len(run.disabled_events), 1)
+        schema = compile.Schema({'q': ('name', 'status')},)
+        run.set_schema('test', schema)
+        self.assertEqual(len(run.error_events), 1)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 0)
+
+    def test_insert_inferred_schema_errors(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        run.insert('p(x) :- q(x)')
+        permitted, errs = run.insert('q(1,2)')
+        self.assertFalse(permitted)
+
+    # deletions
+    def test_delete_enabled(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        run.set_schema('test', schema)
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x)')
+        self.assertEqual(len(obj.content()), 1)
+        run.delete('p(x) :- q(id=x)')
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 0)
+
+    def test_delete_set_schema_disabled(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        obj = run.policy_object('test')
+        run.insert('p(x) :- q(id=x)')
+        run.delete('p(x) :- q(id=x)')
+        self.assertEqual(len(run.disabled_events), 2)
+        self.assertEqual(len(obj.content()), 0)
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        run.set_schema('test', schema)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 0)
+
+    def test_delete_errors(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        schema = compile.Schema({'q': ('name', 'status')})
+        run.set_schema('test', schema)
+        obj = run.policy_object('test')
+        permitted, errors = run.delete('p(x) :- q(id=x)')
+        self.assertFalse(permitted)
+        errstring = " ".join(str(x) for x in errors)
+        self.assertTrue("column name id does not exist" in errstring)
+        self.assertEqual(len(run.error_events), 0)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 0)
+
+    def test_delete_set_schema_errors(self):
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        obj = run.policy_object('test')
+        run.delete('p(x) :- q(id=x)')   # rule is disabled
+        self.assertEqual(len(run.disabled_events), 1)
+        schema = compile.Schema({'q': ('name', 'status')})
+        run.set_schema('test', schema)
+        self.assertEqual(len(run.error_events), 1)
+        self.assertEqual(len(run.disabled_events), 0)
+        self.assertEqual(len(obj.content()), 0)
+
+    # errors in set_schema
+    def test_set_schema_unknown_policy(self):
+        run = agnostic.Runtime()
+        schema = compile.Schema({'q': ('name', 'status')})
+        try:
+            run.set_schema('test', schema)
+            self.fail("Error not thrown on unknown policy")
+        except exception.CongressException as e:
+            self.assertTrue("not been created" in str(e))
+
+    def test_disallow_schema_change(self):
+        # Ensures that cannot change schema once it is set.
+        # Can be removed once we support schema changes (e.g. for upgrade).
+        run = agnostic.Runtime()
+        run.create_policy('test')
+        schema = compile.Schema({'q': ('name', 'status')})
+        run.set_schema('test', schema)
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        try:
+            run.set_schema('test', schema)
+            self.fail("Error not thrown on schema change")
+        except exception.CongressException as e:
+            self.assertTrue("Schema for test already set" in str(e))
 
 
 class TestDelegation(base.TestCase):

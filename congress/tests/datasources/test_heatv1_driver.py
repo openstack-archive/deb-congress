@@ -12,11 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-import contextlib
+import mock
 
 from heatclient.v1 import software_deployments as deployments
 from heatclient.v1 import stacks
-import mock
 
 from congress.datasources import heatv1_driver
 from congress.tests import base
@@ -72,7 +71,7 @@ class TestHeatV1Driver(base.TestCase):
 
     def test_update_from_datasource(self):
         dep = self.mock_software_deployments
-        with contextlib.nested(
+        with base.nested(
                 mock.patch.object(self.driver.heat.stacks,
                                   "list",
                                   return_value=self.mock_value(
@@ -115,7 +114,7 @@ class TestHeatV1Driver(base.TestCase):
                  u'+ echo Writing to /tmp/barmy\n',
                  u'0',
                  u'The file /tmp/barmy contains fu for server')])}
-        self.assertEqual(self.driver.state, expected)
+        self.assertEqual(expected, self.driver.state)
 
     def test_execute(self):
         class HeatClient(object):
@@ -134,4 +133,4 @@ class TestHeatV1Driver(base.TestCase):
 
         self.driver.execute('abandanStack', api_args)
 
-        self.assertEqual(heat_client.testkey, expected_ans)
+        self.assertEqual(expected_ans, heat_client.testkey)

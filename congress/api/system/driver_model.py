@@ -15,6 +15,7 @@
 
 from oslo_log import log as logging
 
+from congress.api import api_utils
 from congress.api import webservice
 from congress.dse import deepsix
 from congress.managers import datasource as datasource_manager
@@ -31,11 +32,14 @@ def d6service(name, keys, inbox, datapath, args):
 class DatasourceDriverModel(deepsix.deepSix):
     """Model for handling API requests about DatasourceDriver."""
     def __init__(self, name, keys, inbox=None, dataPath=None,
-                 policy_engine=None):
+                 datasource_mgr=None):
         super(DatasourceDriverModel, self).__init__(name, keys, inbox=inbox,
                                                     dataPath=dataPath)
-        self.engine = policy_engine
-        self.datasource_mgr = datasource_manager.DataSourceManager()
+        self.datasource_mgr = datasource_mgr
+
+    def rpc(self, caller, name, *args, **kwargs):
+        f = getattr(caller, name)
+        return f(*args, **kwargs)
 
     def get_items(self, params, context=None):
         """Get items in model.
@@ -49,7 +53,7 @@ class DatasourceDriverModel(deepsix.deepSix):
                  a list of items in the model.  Additional keys set in the
                  dict will also be rendered for the user.
         """
-        drivers = self.datasource_mgr.get_drivers_info()
+        drivers = self.rpc(self.datasource_mgr, 'get_drivers_info')
         fields = ['id', 'description']
         results = [self.datasource_mgr.make_datasource_dict(
                    driver, fields=fields)
@@ -70,14 +74,15 @@ class DatasourceDriverModel(deepsix.deepSix):
         """
         datasource = context.get('driver_id')
         try:
-            schema = self.datasource_mgr.get_driver_schema(
-                datasource)
-            driver = self.datasource_mgr.get_driver_info(datasource)
+            schema = self.rpc(self.datasource_mgr, 'get_driver_schema',
+                              datasource)
+            driver = self.rpc(self.datasource_mgr, 'get_driver_info',
+                              datasource)
         except datasource_manager.DriverNotFound as e:
-            raise webservice.DataModelException(e.code, e.message,
+            raise webservice.DataModelException(e.code, str(e),
                                                 http_status_code=e.code)
 
-        tables = [self.datasource_mgr.create_table_dict(table_, schema)
+        tables = [api_utils.create_table_dict(table_, schema)
                   for table_ in schema]
         driver['tables'] = tables
         return driver

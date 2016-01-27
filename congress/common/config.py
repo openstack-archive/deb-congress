@@ -27,8 +27,8 @@ LOG = logging.getLogger(__name__)
 core_opts = [
     cfg.StrOpt('bind_host', default='0.0.0.0',
                help="The host IP to bind to"),
-    cfg.IntOpt('bind_port', default=1789,
-               help="The port to bind to"),
+    cfg.PortOpt('bind_port', default=1789,
+                help="The port to bind to"),
     cfg.IntOpt('max_simultaneous_requests', default=1024,
                help="Thread pool size for eventlet."),
     cfg.BoolOpt('tcp_keepalive', default=False,
@@ -39,11 +39,11 @@ core_opts = [
                help='Sets the value of TCP_KEEPIDLE in seconds for each '
                     'server socket. Only applies if tcp_keepalive is '
                     'true. Not supported on OS X.'),
-    cfg.StrOpt('policy_path', default=None,
+    cfg.StrOpt('policy_path',
                help="The path to the latest policy dump"),
-    cfg.StrOpt('datasource_file', default=None,
+    cfg.StrOpt('datasource_file',
                help="The file containing datasource configuration"),
-    cfg.StrOpt('root_path', default=None,
+    cfg.StrOpt('root_path',
                help="The absolute path to the congress repo"),
     cfg.IntOpt('api_workers', default=1,
                help='The number of worker processes to serve the congress '

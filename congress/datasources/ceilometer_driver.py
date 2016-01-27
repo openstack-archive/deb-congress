@@ -39,7 +39,7 @@ def d6service(name, keys, inbox, datapath, args):
 #   into DataSourceDriver.  E.g. change all the classes to Driver instead of
 #   NeutronDriver, CeilometerDriver, etc. and move the d6instantiate function
 #   to DataSourceDriver.
-class CeilometerDriver(datasource_driver.DataSourceDriver,
+class CeilometerDriver(datasource_driver.PollingDataSourceDriver,
                        datasource_driver.ExecutionDriver):
     METERS = "meters"
     ALARMS = "alarms"
@@ -157,8 +157,8 @@ class CeilometerDriver(datasource_driver.DataSourceDriver,
         datasource_driver.ExecutionDriver.__init__(self)
         self.creds = self.get_ceilometer_credentials_v2(args)
         self.ceilometer_client = cc.get_client(**self.creds)
-        self.inspect_builtin_methods(self.ceilometer_client,
-                                     'ceilometerclient.v2.')
+        self.add_executable_client_methods(self.ceilometer_client,
+                                           'ceilometerclient.v2.')
         self._init_end_start_poll()
 
     @staticmethod
@@ -181,12 +181,16 @@ class CeilometerDriver(datasource_driver.DataSourceDriver,
         self._translate_meters(meters)
         LOG.debug("METERS: %s" % str(self.state[self.METERS]))
 
-        LOG.debug("Ceilometer grabbing alarms")
-        alarms = self.ceilometer_client.alarms.list()
-        self._translate_alarms(alarms)
-        LOG.debug("ALARMS: %s" % str(self.state[self.ALARMS]))
-        LOG.debug("THRESHOLD: %s"
-                  % str(self.state[self.ALARM_THRESHOLD_RULE]))
+        # TODO(ramineni): Ceilometer alarms is moved to seperate
+        # project Aodh. It's not fully functional yet.
+        # Enable it back when its fully functional.
+
+        # LOG.debug("Ceilometer grabbing alarms")
+        # alarms = self.ceilometer_client.alarms.list()
+        # self._translate_alarms(alarms)
+        # LOG.debug("ALARMS: %s" % str(self.state[self.ALARMS]))
+        # LOG.debug("THRESHOLD: %s"
+        #          % str(self.state[self.ALARM_THRESHOLD_RULE]))
 
         LOG.debug("Ceilometer grabbing events")
         events = self.ceilometer_client.events.list()

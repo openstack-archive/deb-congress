@@ -23,7 +23,7 @@ def d6service(name, keys, inbox, datapath, args):
     return CinderDriver(name, keys, inbox, datapath, args)
 
 
-class CinderDriver(datasource_driver.DataSourceDriver,
+class CinderDriver(datasource_driver.PollingDataSourceDriver,
                    datasource_driver.ExecutionDriver):
     VOLUMES = "volumes"
     SNAPSHOTS = "snapshots"
@@ -80,7 +80,8 @@ class CinderDriver(datasource_driver.DataSourceDriver,
         datasource_driver.ExecutionDriver.__init__(self)
         self.creds = self.get_cinder_credentials_v2(args)
         self.cinder_client = cinderclient.client.Client(**self.creds)
-        self.inspect_builtin_methods(self.cinder_client, 'cinderclient.v2.')
+        self.add_executable_client_methods(self.cinder_client,
+                                           'cinderclient.v2.')
         self._init_end_start_poll()
 
     @staticmethod

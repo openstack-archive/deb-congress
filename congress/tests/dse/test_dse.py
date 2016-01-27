@@ -73,7 +73,7 @@ class TestDSE(base.TestCase):
         policy = cage.services['policy']['object']
         # turn off module-schema syntax checking
         policy.create_policy('data')
-        policy.set_schema('data', compile.Schema({'p': (1,)}))
+        policy.set_schema('data', compile.Schema({'p': ((1, None),)}))
         policy.subscribe('data', 'p', callback=policy.receive_data)
         formula = policy.parse1('p(1)')
         # sending a single Insert.  (Default for Event is Insert.)
@@ -147,7 +147,7 @@ class TestDSE(base.TestCase):
         policy.insert('p(x):-data:q(x),gt(x,2)', target='classification')
         data.subscribe('policy', 'classification:p', callback=data.receive_msg)
         helper.retry_check_subscribers(policy, [('data', 'classification:p')])
-        self.assertEqual(policy.policySubData.keys(),
+        self.assertEqual(list(policy.policySubData.keys()),
                          [('p', 'classification', None)])
         policy.insert('q(1)', target='data')
         # no entry here
@@ -173,4 +173,4 @@ class TestDSE(base.TestCase):
         # trigger removed
         helper.retry_check_no_subscribers(policy,
                                           [('data', 'classification:p')])
-        self.assertEqual(policy.policySubData.keys(), [])
+        self.assertEqual(list(policy.policySubData.keys()), [])

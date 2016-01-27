@@ -177,7 +177,8 @@ class TestDataSourceManager(base.SqlTestCase):
                           self.datasource_mgr.get_datasource,
                           result['id'])
         engine = self.cage.service_object('engine')
-        self.assertFalse(engine.policy_exists(req['name']))
+        self.assertRaises(exception.PolicyRuntimeException,
+                          engine.assert_policy_exists, req['name'])
         # TODO(thinrichs): test that we've actually removed
         #   the row from the DB
 
@@ -214,16 +215,6 @@ class TestDataSourceManager(base.SqlTestCase):
         self.assertRaises(datasource_manager.DatasourceNotFound,
                           self.datasource_mgr.get_datasource_schema,
                           "does_not_exist")
-
-    def test_create_table_dict(self):
-        table_name = 'fake_table'
-        schema = {'fake_table': ('id', 'name')}
-        expected = {'table_id': table_name,
-                    'columns': [{'name': 'id', 'description': 'None'},
-                                {'name': 'name', 'description': 'None'}]}
-        result = self.datasource_mgr.create_table_dict(table_name,
-                                                       schema)
-        self.assertEqual(expected, result)
 
     def test_duplicate_driver_name_raises(self):
         # Load the driver twice

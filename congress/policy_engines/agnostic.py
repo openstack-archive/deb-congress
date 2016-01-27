@@ -16,6 +16,7 @@
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 import six
+from six.moves import range
 
 from congress.datalog import base
 from congress.datalog import compile
@@ -219,6 +220,12 @@ class Runtime (object):
         self.trigger_registry = TriggerRegistry(self.global_dependency_graph)
         # execution triggers
         self.execution_triggers = {}
+        # disabled rules
+        self.disabled_events = []
+        # rules with errors (because of schema inconsistencies)
+        self.error_events = []
+        # synchronizer
+        self.synchronizer = None
 
     ###############################################
     # Persistence layer
@@ -233,7 +240,7 @@ class Runtime (object):
             raise exception.PolicyException(
                 "Policy name %s is not a valid tablename" % name)
 
-        # create policy in policy engine
+        # Create policy object in policy engine.
         if id_ is None:
             id_ = str(uuidutils.generate_uuid())
         policy_obj = self.create_policy(
@@ -255,6 +262,14 @@ class Runtime (object):
                                        obj['description'],
                                        obj['owner_id'],
                                        obj['kind'])
+
+            # There is a chance that the synchronizer will run and delete
+            # policy_obj from the policy engine before the
+            # db_policy_rules.add_policy() adds the policy to the database.
+            # Call synchronize_policies() to ensure that the policy_engine has
+            # all the policies in the database.
+            if self.synchronizer:
+                self.synchronizer.synchronize_policies()
         except Exception:
             policy_name = policy_obj.name
             self.delete_policy(policy_name)
@@ -263,19 +278,14 @@ class Runtime (object):
             raise exception.PolicyException(msg)
         return obj
 
-    def persistent_delete_policy(self, id_):
-        # check that policy exists
-        db_object = db_policy_rules.get_policy(id_)
-        if db_object is None:
-            raise KeyError("Cannot delete policy with ID '%s': "
-                           "ID '%s' does not exist",
-                           id_, id_)
+    def persistent_delete_policy(self, name_or_id):
+        db_object = db_policy_rules.get_policy(name_or_id)
         if db_object['name'] in ['classification', 'action']:
-            raise KeyError("Cannot delete system-maintained policy %s",
+            raise KeyError("Cannot delete system-maintained policy %s" %
                            db_object['name'])
         # delete policy from memory and from database
-        self.delete_policy(id_)
-        db_policy_rules.delete_policy(id_)
+        self.delete_policy(db_object['id'])
+        db_policy_rules.delete_policy(db_object['id'])
         return db_object.to_dict()
 
     def persistent_get_policies(self):
@@ -290,6 +300,8 @@ class Runtime (object):
 
     def persistent_get_rule(self, id_, policy_name):
         """Return data for rule with id_ in policy_name."""
+        # Check if policy exists, else raise error
+        self.assert_policy_exists(policy_name)
         rule = db_policy_rules.get_policy_rule(id_, policy_name)
         if rule is None:
             return
@@ -297,13 +309,17 @@ class Runtime (object):
 
     def persistent_get_rules(self, policy_name):
         """Return data for all rules in policy_name."""
+        # Check if policy exists, else raise error
+        self.assert_policy_exists(policy_name)
         rules = db_policy_rules.get_policy_rules(policy_name)
         return [rule.to_dict() for rule in rules]
 
-    def persistent_insert_rule(self, policy_name, str_rule, rule_name):
+    def persistent_insert_rule(self, policy_name, str_rule, rule_name,
+                               comment):
         """Insert and persists rule into policy_name."""
         # Reject rules inserted into non-persisted policies
         # (i.e. datasource policies)
+        policy_name = db_policy_rules.policy_name(policy_name)
         policies = db_policy_rules.get_policies()
         persisted_policies = set([p.name for p in policies])
         if policy_name not in persisted_policies:
@@ -331,14 +347,13 @@ class Runtime (object):
 
         rule.set_id(id_)
         rule.set_name(rule_name)
-        rule.set_comment(None)
+        rule.set_comment(comment or "")
         rule.set_original_str(str_rule)
         changes = self._safe_process_policy_update(rule, policy_name)
-
-        # check if change accepted by policy engine
-        for change in changes:
-            if change.formula != rule:
-                continue
+        # save rule to database if change actually happened.
+        # Note: change produced may not be equivalent to original rule because
+        #    of column-reference elimination.
+        if len(changes) > 0:
             d = {'rule': rule.pretty_str(),
                  'id': str(rule.id),
                  'comment': rule.comment,
@@ -363,7 +378,8 @@ class Runtime (object):
         raise exception.PolicyRuntimeException(
             name='rule_already_exists')
 
-    def persistent_delete_rule(self, id_, policy_name):
+    def persistent_delete_rule(self, id_, policy_name_or_id):
+        policy_name = db_policy_rules.policy_name(policy_name_or_id)
         item = self.persistent_get_rule(id_, policy_name)
         if item is None:
             raise exception.PolicyRuntimeException(
@@ -378,13 +394,18 @@ class Runtime (object):
         """Load policies from database."""
         for policy in db_policy_rules.get_policies():
             self.create_policy(policy.name, abbr=policy.abbreviation,
-                               kind=policy.kind, id_=policy.id)
+                               kind=policy.kind, id_=policy.id,
+                               desc=policy.description, owner=policy.owner)
 
     def persistent_load_rules(self):
         """Load all rules from the database."""
         rules = db_policy_rules.get_policy_rules()
         for rule in rules:
             parsed_rule = self.parse1(rule.rule)
+            parsed_rule.set_id(rule.id)
+            parsed_rule.set_name(rule.name)
+            parsed_rule.set_comment(rule.comment)
+            parsed_rule.set_original_str(rule.rule)
             self._safe_process_policy_update(
                 parsed_rule,
                 rule.policy_name)
@@ -410,7 +431,8 @@ class Runtime (object):
     # Non-persistence layer
     ##########################
 
-    def create_policy(self, name, abbr=None, kind=None, id_=None):
+    def create_policy(self, name, abbr=None, kind=None, id_=None,
+                      desc=None, owner=None):
         """Create a new policy and add it to the runtime.
 
         ABBR is a shortened version of NAME that appears in
@@ -437,10 +459,13 @@ class Runtime (object):
             PolicyClass = db.Database
         elif kind == base.MATERIALIZED_POLICY_TYPE:
             PolicyClass = materialized.MaterializedViewTheory
+        elif kind == base.DATASOURCE_POLICY_TYPE:
+            PolicyClass = nonrecursive.DatasourcePolicyTheory
         else:
             raise exception.PolicyException(
                 "Unknown kind of policy: %s" % kind)
-        policy_obj = PolicyClass(name=name, abbr=abbr, theories=self.theory)
+        policy_obj = PolicyClass(name=name, abbr=abbr, theories=self.theory,
+                                 desc=desc, owner=owner)
         policy_obj.set_id(id_)
         policy_obj.set_tracer(self.tracer)
         self.theory[name] = policy_obj
@@ -472,30 +497,43 @@ class Runtime (object):
                           self.name, name, msg)
             raise exception.PolicyException("Policy %s could not be deleted "
                                             "since rules could not all be "
-                                            "deleted: %s", name, msg)
+                                            "deleted: %s" % (name, msg))
+        # delete disabled rules
+        self.disabled_events = [event for event in self.disabled_events
+                                if event.target.name != name]
+        # actually delete the theory
         del self.theory[name]
 
     def rename_policy(self, oldname, newname):
         """Renames policy OLDNAME to NEWNAME or raises KeyError."""
         if newname in self.theory:
-            raise KeyError('Cannot rename %s to %s: %s already exists',
-                           oldname, newname, newname)
+            raise KeyError('Cannot rename %s to %s: %s already exists' %
+                           (oldname, newname, newname))
         try:
             self.theory[newname] = self.theory[oldname]
             del self.theory[oldname]
         except KeyError:
-            raise KeyError('Cannot rename %s to %s: %s does not exist',
-                           oldname, newname, oldname)
+            raise KeyError('Cannot rename %s to %s: %s does not exist' %
+                           (oldname, newname, oldname))
 
     # TODO(thinrichs): make Runtime act like a dictionary so that we
     #   can iterate over policy names (keys), check if a policy exists, etc.
-    def policy_exists(self, name):
-        """Returns True iff policy called NAME exists."""
-        return name in self.theory
+    def assert_policy_exists(self, policy_name):
+        """Checks if policy exists or not.
+
+        :param policy_name: policy name
+        :returns: True, if policy exists
+        :raises: PolicyRuntimeException, if policy doesn't exist.
+        """
+        if policy_name not in self.theory:
+            raise exception.PolicyRuntimeException(
+                'Policy ID %s does not exist' % policy_name,
+                name='policy_not_exist')
+        return True
 
     def policy_names(self):
         """Returns list of policy names."""
-        return self.theory.keys()
+        return list(self.theory.keys())
 
     def policy_object(self, name=None, id=None):
         """Return policy by given name.  Raises KeyError if does not exist."""
@@ -520,7 +558,52 @@ class Runtime (object):
 
     def set_schema(self, name, schema, complete=False):
         """Set the schema for module NAME to be SCHEMA."""
+        # TODO(thinrichs): handle the case of a schema being UPDATED,
+        #   not just being set for the first time
+        if name not in self.theory:
+            raise exception.CongressException(
+                "Cannot set policy for %s because it has not been created" %
+                name)
+        if self.theory[name].schema and len(self.theory[name].schema) > 0:
+            raise exception.CongressException(
+                "Schema for %s already set" % name)
         self.theory[name].schema = compile.Schema(schema, complete=complete)
+        enabled, disabled, errs = self._process_limbo_events(
+            self.disabled_events)
+        self.disabled_events = disabled
+        self.error_events.extend(errs)
+        for event in enabled:
+            permitted, errors = self._update_obj_datalog([event])
+            if not permitted:
+                self.error_events.append((event, errors))
+
+    def _create_status_dict(self, target, keys):
+        result = {}
+
+        for k in keys:
+            attr = getattr(target, k, None)
+            if attr is not None:
+                result[k] = attr
+
+        return result
+
+    def get_status(self, policy_id_name, context):
+        try:
+            if policy_id_name in self.policy_names():
+                target = self.policy_object(name=policy_id_name)
+            else:
+                target = self.policy_object(id=policy_id_name)
+            keys = ['name', 'id']
+
+            if 'rule_id' in context:
+                target = target.get_rule(str(context['rule_id']))
+                keys.extend(['comment', 'original_str'])
+
+        except Exception as e:
+            LOG.exception(e)
+            raise exception.NotFound(str(e))
+
+        return self._create_status_dict(target, keys)
 
     def select(self, query, target=None, trace=False):
         """Event handler for arbitrary queries.
@@ -647,12 +730,70 @@ class Runtime (object):
             return self._simulate_obj(query, theory, sequence, action_theory,
                                       delta, trace)
 
-    def tablenames(self, body_only=False, include_builtin=False):
+    def get_tablename(self, th_name, table_name):
+        tables = self.get_tablenames(th_name)
+        # when the policy doesn't have any rule 'tables' is set([])
+        # when the policy doesn't exist 'tables' is None
+        if tables and table_name in tables:
+            return table_name
+
+    def get_tablenames(self, th_name):
+        if th_name in self.theory.keys():
+            return self.tablenames(theory_name=th_name, include_modal=False)
+
+    def get_row_data(self, table_id, policy_name, trace=False):
+        tablename = self.get_tablename(policy_name, table_id)
+        if not tablename:
+            raise exception.NotFound("table '%s' doesn't exist" % table_id)
+
+        queries = self.table_contents_queries(tablename, policy_name)
+        if queries is None:
+            m = "Known table but unknown arity for '%s' in policy '%s'" % (
+                tablename, policy_name)
+            LOG.error(m)
+            raise exception.CongressException(m)
+
+        gen_trace = None
+        query = self.parse1(queries[0])
+        # LOG.debug("query: %s", query)
+        result = self.select(query, target=policy_name,
+                             trace=trace)
+        if trace:
+            literals = result[0]
+            gen_trace = result[1]
+        else:
+            literals = result
+        # should NOT need to convert to set -- see bug 1344466
+        literals = frozenset(literals)
+        # LOG.info("results: %s", '\n'.join(str(x) for x in literals))
+        results = []
+        for lit in literals:
+            d = {}
+            d['data'] = [arg.name for arg in lit.arguments]
+            results.append(d)
+
+        if trace:
+            return results, gen_trace
+        else:
+            return results
+
+    def tablenames(self, body_only=False, include_builtin=False,
+                   theory_name=None, include_modal=True):
         """Return tablenames occurring in some theory."""
         tables = set()
+
+        if theory_name:
+            th = self.theory.get(theory_name, None)
+            if th:
+                tables |= set(th.tablenames(body_only=body_only,
+                                            include_builtin=include_builtin,
+                                            include_modal=include_modal))
+            return tables
+
         for th in self.theory.values():
-            tables |= set(th.tablenames(
-                body_only=body_only, include_builtin=include_builtin))
+            tables |= set(th.tablenames(body_only=body_only,
+                                        include_builtin=include_builtin,
+                                        include_modal=include_modal))
         return tables
 
     def reserved_tablename(self, name):
@@ -664,7 +805,7 @@ class Runtime (object):
         arity = self.arity(tablename, policy, modal)
         if arity is None:
             return
-        args = ["x" + str(i) for i in xrange(0, arity)]
+        args = ["x" + str(i) for i in range(0, arity)]
         atom = tablename + "(" + ",".join(args) + ")"
         if modal is None:
             return [atom]
@@ -764,19 +905,15 @@ class Runtime (object):
         assert False, "Not yet implemented--need parser to read events"
 
     def _update_obj(self, events, theory_string):
-        """Do the updating.
+        """Apply events.
 
         Checks if applying EVENTS is permitted and if not
         returns a list of errors.  If it is permitted, it
         applies it and then returns a list of changes.
         In both cases, the return is a 2-tuple (if-permitted, list).
         Note: All event.target fields are the NAMES of theories, not
-        theory objects.
+        theory objects.  theory_string is the default theory.
         """
-        # TODO(thinrichs): look into whether we can move the bulk of the
-        # trigger code into Theory, esp. so that MaterializedViewTheory
-        # can implement it more efficiently.
-        self.table_log(None, "Updating with %s", utility.iterstr(events))
         errors = []
         # resolve event targets and check that they actually exist
         for event in events:
@@ -788,6 +925,70 @@ class Runtime (object):
                 errors.append(e)
         if len(errors) > 0:
             return (False, errors)
+        # eliminate column refs where possible
+        enabled, disabled, errs = self._process_limbo_events(events)
+        for err in errs:
+            errors.extend(err[1])
+        if len(errors) > 0:
+            return (False, errors)
+        # continue updating and if successful disable the rest
+        permitted, extra = self._update_obj_datalog(enabled)
+        if not permitted:
+            return permitted, extra
+        self._disable_events(disabled)
+        return (True, extra)
+
+    def _disable_events(self, events):
+        """Take collection of insert events and disable them.
+
+        Assume that events.theory is an object.
+        """
+        self.disabled_events.extend(events)
+
+    def _process_limbo_events(self, events):
+        """Assume that events.theory is an object.
+
+        Return (<enabled>, <disabled>, <errors>)
+        where <errors> is a list of (event, err-list).
+        """
+        disabled = []
+        enabled = []
+        errors = []
+        for event in events:
+            errs = compile.check_schema_consistency(
+                event.formula, self.theory, event.target)
+            if len(errs) > 0:
+                errors.append((event, errs))
+                continue
+            try:
+                oldformula = event.formula
+                event.formula = oldformula.eliminate_column_references(
+                    self.theory, event.target)
+                # doesn't copy over ID since it creates a new one
+                event.formula.set_id(oldformula.id)
+                enabled.append(event)
+            except exception.IncompleteSchemaException:
+                disabled.append(event)
+            except exception.PolicyException as e:
+                errors.append((event, [e]))
+        return enabled, disabled, errors
+
+    def _update_obj_datalog(self, events):
+        """Do the updating.
+
+        Checks if applying EVENTS is permitted and if not
+        returns a list of errors.  If it is permitted, it
+        applies it and then returns a list of changes.
+        In both cases, the return is a 2-tuple (if-permitted, list).
+        Note: All event.target fields are the NAMES of theories, not
+        theory objects, and all event.formula fields have
+        had all column references removed.
+        """
+        # TODO(thinrichs): look into whether we can move the bulk of the
+        # trigger code into Theory, esp. so that MaterializedViewTheory
+        # can implement it more efficiently.
+        self.table_log(None, "Updating with %s", utility.iterstr(events))
+        errors = []
         # eliminate noop events
         events = self._actual_events(events)
         if not len(events):
@@ -797,6 +998,8 @@ class Runtime (object):
         for th, th_events in by_theory.items():
             th_obj = self.get_target(th)
             errors.extend(th_obj.update_would_cause_errors(th_events))
+        if len(errors) > 0:
+            return (False, errors)
         # update dependency graph (and undo it if errors)
         graph_changes = self.global_dependency_graph.formula_update(
             events, include_atoms=False)
@@ -1671,7 +1874,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
             subs = self.pubdata[dataindex].getsubscribers()
             # The sender is the last subscriber
             # inunsub() will remove it from pubdata[dataindex] later
-            if [sender] == subs.keys():
+            if [sender] == list(subs.keys()):
                 sub = self.policySubData.pop((tablename, policy, None))
                 self.trigger_registry.unregister(sub.trigger())
 
@@ -1731,7 +1934,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
                 self.execution_triggers[table] = trig
         # remove triggers no longer needed
         #    Using copy of execution_trigger keys so we can delete inside loop
-        for table in self.execution_triggers.keys():
+        for table in self.execution_triggers.copy().keys():
             LOG.debug("%s:: checking for stale trigger table %s",
                       self.name, table)
             if table not in curr_tables:
@@ -1758,3 +1961,6 @@ class DseRuntime (Runtime, deepsix.deepSix):
                 self.execute_action(service, tablename, {'positional': args})
             except exception.PolicyException as e:
                 LOG.error(str(e))
+
+    def set_synchronizer(self, synchronizer):
+        self.synchronizer = synchronizer

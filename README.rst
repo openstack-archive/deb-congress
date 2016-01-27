@@ -97,28 +97,20 @@ There are 2 ways to install Congress.
 
 4.1 Devstack-install
 --------------------
-The contrib/devstack/ directory contains the files necessary to integrate
-Congress with devstack.
+For integrating congress with DevStack::
 
-To install, make sure you have *git* installed.  Then::
+1. Download DevStack::
 
-    $ git clone https://git.openstack.org/openstack-dev/devstack
-     (Or set env variable DEVSTACKDIR to the location to your devstack code)
+    git clone https://git.openstack.org/openstack-dev/devstack.git
+    cd devstack
 
-    $ wget http://git.openstack.org/cgit/openstack/congress/plain/contrib/devstack/prepare_devstack.sh
+2. Add this repo as an external repository::
 
-    $ chmod u+x prepare_devstack.sh
+     > cat local.conf
+     [[local|localrc]]
+     enable_plugin congress https://git.openstack.org/openstack/congress
 
-    $ ./prepare_devstack.sh
-
-Configure ENABLED_SERVICES in the devstack/localrc file (make sure to include congress)::
-
-    ENABLED_SERVICES=congress,g-api,g-reg,key,n-api,n-crt,n-obj,n-cpu,n-sch,n-cauth,horizon,mysql,rabbit,sysstat,cinder,c-api,c-vol,c-sch,n-cond,quantum,q-svc,q-agt,q-dhcp,q-l3,q-meta,n-novnc,n-xvnc,q-lbaas,ceilometer-acompute,ceilometer-acentral,ceilometer-anotification,ceilometer-collector,ceilometer-alarm-evaluator,ceilometer-alarm-notifier,ceilometer-api,s-proxy,s-object,s-container,s-account,tempest
-
-Run devstack as normal. Note: the default data source configuration assumes the
-admin password is 'password'::
-
-    $ ./stack.sh
+3. Run ``stack.sh``
 
 4.2 Standalone-install
 ----------------------
@@ -195,11 +187,11 @@ Setup congress accounts::
   $ ADMIN_ROLE=$(openstack role list | awk "/ admin / { print \$2 }")
   $ SERVICE_TENANT=$(openstack project list | awk "/ admin / { print \$2 }")
   $ CONGRESS_USER=$(openstack user create --password password --project admin \
-    --email "congress@example.com" congress)
+    --email "congress@example.com" congress | awk "/ id / {print \$4 }")
   $ openstack role add $ADMIN_ROLE --user $CONGRESS_USER --project \
     $SERVICE_TENANT
   $ CONGRESS_SERVICE=$(openstack service create congress --type "policy" \
-    --description "Congress Service")
+    --description "Congress Service" | awk "/ congress / { print \$2 }")
   $ openstack endpoint create $CONGRESS_SERVICE \
     --region RegionOne \
     --publicurl http://127.0.0.1:1789/ \

@@ -6,12 +6,10 @@ tox -egenconfig #Generates etc/congress.conf.sample
 
 If tox is not installed, you may install it as follows:
 
-$ sudo pip install tox==2.1.1
+$ sudo pip install tox
 
 If you experience error(s) generating a sample conf file
-you may be able to resolve them by installing the following
-tested versions:
+you may be able to resolve them by ensuring you have
+virtualenv version 12.0.0 or higher installed.
 
-$ sudo pip install -I virtualenv==13.1.2
-$ sudo pip install -I setuptools==18.3.2
-$ sudo pip install -I tox==2.1.1
+$ virtualenv --version # check virtualenv version

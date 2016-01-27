@@ -29,7 +29,7 @@ def d6service(name, keys, inbox, datapath, args):
     return CloudFoundryV2Driver(name, keys, inbox, datapath, args)
 
 
-class CloudFoundryV2Driver(datasource_driver.DataSourceDriver,
+class CloudFoundryV2Driver(datasource_driver.PollingDataSourceDriver,
                            datasource_driver.ExecutionDriver):
     ORGANIZATIONS = 'organizations'
     SERVICE_BINDINGS = 'service_bindings'
@@ -189,8 +189,8 @@ class CloudFoundryV2Driver(datasource_driver.DataSourceDriver,
             for temp_app in temp_apps['resources']:
                 service_bindings = self.cloudfoundry.get_app_service_bindings(
                     temp_app['metadata']['guid'])
-                data = dict(temp_app['metadata'].items() +
-                            temp_app['entity'].items())
+                data = dict(list(temp_app['metadata'].items()) +
+                            list(temp_app['entity'].items()))
                 app_services = self._get_app_services_guids(service_bindings)
                 if app_services:
                     data['service_bindings'] = app_services
@@ -204,8 +204,8 @@ class CloudFoundryV2Driver(datasource_driver.DataSourceDriver,
         for org in self._cached_organizations:
             temp_spaces = self.cloudfoundry.get_organization_spaces(org)
             for temp_space in temp_spaces['resources']:
-                spaces.append(dict(temp_space['metadata'].items() +
-                                   temp_space['entity'].items()))
+                spaces.append(dict(list(temp_space['metadata'].items()) +
+                                   list(temp_space['entity'].items())))
         return spaces
 
     @ds_utils.update_state_on_changed(SERVICES)
@@ -222,7 +222,8 @@ class CloudFoundryV2Driver(datasource_driver.DataSourceDriver,
         # convert_objs needs the data structured a specific way so we
         # do this here. Perhaps we can improve convert_objs later to be
         # more flexiable.
-        results = [dict(o['metadata'].items() + o['entity'].items())
+        results = [dict(list(o['metadata'].items()) +
+                        list(o['entity'].items()))
                    for o in obj['resources']]
         row_data = CloudFoundryV2Driver.convert_objs(
             results,

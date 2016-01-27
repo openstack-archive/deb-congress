@@ -13,9 +13,11 @@
 #    under the License.
 #
 import collections
-import cStringIO
 
 from oslo_log import log as logging
+import six
+
+from congress import exception
 
 LOG = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ NONRECURSIVE_POLICY_TYPE = 'nonrecursive'
 ACTION_POLICY_TYPE = 'action'
 MATERIALIZED_POLICY_TYPE = 'materialized'
 DELTA_POLICY_TYPE = 'delta'
+DATASOURCE_POLICY_TYPE = 'datasource'
 
 
 class Tracer(object):
@@ -49,7 +52,7 @@ class Tracer(object):
 class StringTracer(Tracer):
     def __init__(self):
         super(StringTracer, self).__init__()
-        self.stream = cStringIO.StringIO()
+        self.stream = six.moves.StringIO()
         self.funcs.append(self.string_output)
 
     def string_output(self, msg, *args):
@@ -121,11 +124,13 @@ class EventQueue(object):
 
 class Theory(object):
     def __init__(self, name=None, abbr=None, schema=None, theories=None,
-                 id=None):
+                 id=None, desc=None, owner=None, kind=None):
         self.schema = schema
         self.theories = theories
-        self.kind = None
+        self.kind = kind
         self.id = id
+        self.desc = desc
+        self.owner = owner
 
         self.tracer = Tracer()
         if name is None:
@@ -194,11 +199,13 @@ class Theory(object):
         """
         raise NotImplementedError()
 
-    def tablenames(self, body_only=False, include_builtin=False):
+    def tablenames(self, body_only=False, include_builtin=False,
+                   include_modal=True):
         tablenames = set()
         for rule in self.policy():
             tablenames |= rule.tablenames(
-                body_only=body_only, include_builtin=include_builtin)
+                body_only=body_only, include_builtin=include_builtin,
+                include_modal=include_modal)
         return tablenames
 
     def __str__(self):
@@ -211,7 +218,7 @@ class Theory(object):
         for p in self.policy():
             if hasattr(p, 'id') and str(p.id) == str(ident):
                 return p
-        return
+        raise exception.NotFound('rule_id %s  is not found.' % ident)
 
     def arity(self, tablename, modal=None):
         """Return the number of columns for the given tablename.

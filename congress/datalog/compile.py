@@ -12,22 +12,43 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 
+import collections
 import copy
 import functools
 import optparse
 import uuid
 
+
 import six
+from six.moves import range
 
-import antlr3
-
-import CongressLexer
-import CongressParser
 from oslo_log import log as logging
 
 from congress.datalog import analysis
 from congress.datalog.builtin import congressbuiltin
+
+# set up appropriate antlr paths per python version and import runtime
+# import appropriate Lexer & Parser per python version
+import os
+import sys
+_congressDir = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if six.PY2:
+    sys.path.append(_congressDir +
+                    "/thirdparty/antlr3-antlr-3.5/runtime/Python/")
+    from congress.datalog.Python2 import CongressLexer
+    from congress.datalog.Python2 import CongressParser
+else:
+    sys.path.append(_congressDir +
+                    "/thirdparty/antlr3-antlr-3.5/runtime/Python3/")
+    from congress.datalog.Python3 import CongressLexer
+    from congress.datalog.Python3 import CongressParser
+import antlr3
+
 from congress.datalog import utility
 from congress import exception
 from congress import utils
@@ -47,10 +68,13 @@ class Schema(object):
     def __init__(self, dictionary=None, complete=False):
         if dictionary is None:
             self.map = {}
+            self.count = {}
         elif isinstance(dictionary, Schema):
             self.map = dict(dictionary.map)
+            self.count = dictionary.count
         else:
             self.map = dictionary
+            self.count = None
         # whether to assume there is an entry in this schema for
         # every permitted table
         self.complete = complete
@@ -58,13 +82,24 @@ class Schema(object):
     def __contains__(self, tablename):
         return tablename in self.map
 
+    @classmethod
+    def col(self, cols):
+        # For Datasource tables, columns would be in the format -
+        # {'name': 'colname', 'desc': 'description'}
+        if len(cols) and isinstance(cols[0], dict):
+            return [x['name'] for x in cols]
+        else:
+            return [x for x in cols]
+
     def columns(self, tablename):
         """Returns the list of column names for the given TABLENAME.
 
         Return None if the tablename's columns are unknown.
         """
-        if tablename in self.map:
-            return self.map[tablename]
+        if tablename not in self.map.keys():
+            return
+        cols = self.map[tablename]
+        return Schema.col(cols)
 
     def arity(self, tablename):
         """Returns the number of columns for the given TABLENAME.
@@ -74,8 +109,113 @@ class Schema(object):
         if tablename in self.map:
             return len(self.map[tablename])
 
+    def update(self, item, is_insert):
+        """Returns the schema change of this update.
+
+        Return schema change.
+        """
+        if self.count is None:
+            return None
+        if isinstance(item, Fact):
+            tablename, tablelen = item.table, len(item)
+            th = None
+        elif isinstance(item, Literal):
+            tablename, tablelen = item.table.table, len(item.arguments)
+            th = item.table.service
+        else:
+            raise exception.PolicyException(
+                "Schema cannot update item: %r" % item)
+
+        schema_change = None
+        if is_insert:
+            if tablename in self:
+                self.count[tablename] += 1
+                schema_change = (tablename, None, True, th)
+            else:
+                self.count[tablename] = 1
+                val = ["Col"+str(i) for i in range(0, tablelen)]
+                self.map[tablename] = val
+                schema_change = (tablename, val, True, th)
+        else:
+            if tablename not in self:
+                LOG.warn("Attempt to delete a non-existant rule: %s" % item)
+            elif self.count[tablename] > 1:
+                self.count[tablename] -= 1
+                schema_change = (tablename, None, False, th)
+            else:
+                schema_change = (tablename, self.map[tablename], False, th)
+                del self.count[tablename]
+                del self.map[tablename]
+        return schema_change
+
+    def revert(self, change):
+        """Revert change made by update.
+
+        Return None
+        """
+        if change is None:
+            return
+
+        inserted = change[2]
+        tablename = change[0]
+        val = change[1]
+
+        if inserted:
+            if self.count[tablename] > 1:
+                self.count[tablename] -= 1
+            else:
+                del self.map[tablename]
+                del self.count[tablename]
+        else:
+            if tablename in self.count:
+                self.count[tablename] += 1
+            else:
+                assert val is not None
+                self.map[tablename] = val
+                self.count[tablename] = 1
+
+    def column_number(self, tablename, column):
+        """Returns the 0-indexed position of the given COLUMN for TABLENAME.
+
+        Returns None if TABLENAME or COLUMNNAME are unknown.
+        Returns COLUMN if it is a number.
+        """
+        table_columns = self.columns(tablename)
+        if table_columns is None:
+            return
+
+        if isinstance(column, six.integer_types):
+            if column > len(table_columns):
+                return
+            return column
+        try:
+            return table_columns.index(column)
+        except ValueError:
+            return
+
+    def column_name(self, tablename, column):
+        """Returns name for given COLUMN or None if it is unknown."""
+        table_columns = self.columns(tablename)
+        if table_columns is None:
+            return
+        if isinstance(column, six.string_types):
+            if column in table_columns:
+                return column
+            return
+        try:
+            return self.map[tablename][column]
+        except IndexError:
+            return
+
     def __str__(self):
-        return str(self.map)
+        schemas = []
+        for table, columns in self.map.items():
+            cols = ",".join(str(x) for x in columns)
+            schemas.append("schema[%s(%s)]" % (table, cols))
+        return " ".join(schemas)
+
+    def __len__(self):
+        return len(self.map)
 
 
 class Term(object):
@@ -221,7 +361,6 @@ class Fact (tuple):
         return super(Fact, cls).__new__(cls, values)
 
     def __init__(self, table, values):
-        super(Fact, self).__init__(table, values)
         self.table = table
 
     def __lt__(self, other):
@@ -237,6 +376,9 @@ class Fact (tuple):
         if self.table != other.table:
             return False
         return super(Fact, self).__eq__(other)
+
+    def __hash__(self):
+        return hash((self.SORT_RANK, self.table, super(Fact, self).__hash__()))
 
 
 @functools.total_ordering
@@ -301,9 +443,15 @@ class Tablename(object):
         if self.modal != other.modal:
             return self.modal < other.modal
         if self.service != other.service:
+            # manually handle None cases for py3 compat
+            if (self.service is None):
+                return True
+            if (other.service is None):
+                return False
             return self.service < other.service
         if self.table != other.table:
             return self.table < other.table
+        return False
 
     def __eq__(self, other):
         return (isinstance(other, Tablename) and
@@ -321,8 +469,8 @@ class Tablename(object):
         otherservice = other.service or default_service
         return selfservice == otherservice
 
-    def __neq__(self, other):
-        return not self == other
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
     def __hash__(self):
         if self._hash is None:
@@ -399,11 +547,11 @@ class Literal (object):
     """Represents a possibly negated atomic statement, e.g. p(a, 17, b)."""
     SORT_RANK = 5
     __slots__ = ['table', 'arguments', 'location', 'negated', '_hash',
-                 'id', 'name', 'comment', 'original_str']
+                 'id', 'name', 'comment', 'original_str', 'named_arguments']
 
     def __init__(self, table, arguments, location=None, negated=False,
                  use_modules=True, id_=None, name=None, comment=None,
-                 original_str=None):
+                 original_str=None, named_arguments=None):
         if isinstance(table, Tablename):
             self.table = table
         else:
@@ -417,13 +565,27 @@ class Literal (object):
         self.name = name
         self.comment = comment
         self.original_str = original_str
+        if named_arguments is None:
+            self.named_arguments = collections.OrderedDict()
+        else:
+            # Python3: explicitly split out the integer names from others
+            self.named_arguments = collections.OrderedDict(
+                sorted([(n, o)
+                        for n, o in named_arguments.items() if
+                        isinstance(n, six.integer_types)])
+                +
+                sorted([(n, o)
+                        for n, o in named_arguments.items() if
+                        not isinstance(n, six.integer_types)])
+            )
 
     def __copy__(self):
         # use_modules=False so that we get exactly what we started
         #   with
         newone = Literal(self.table, self.arguments, self.location,
                          self.negated, False, self.id,
-                         self.name, self.comment, self.original_str)
+                         self.name, self.comment, self.original_str,
+                         self.named_arguments)
         return newone
 
     def set_id(self, id):
@@ -456,13 +618,20 @@ class Literal (object):
         ['p', 17, "string", 3.14].  Returns the corresponding Literal.
         """
         arguments = []
-        for i in xrange(1, len(list)):
+        for i in range(1, len(list)):
             arguments.append(Term.create_from_python(list[i]))
         return cls(list[0], arguments)
 
     def __str__(self):
-        s = "{}({})".format(self.tablename(),
-                            ", ".join([str(x) for x in self.arguments]))
+        args = ", ".join([str(x) for x in self.arguments])
+        named = ", ".join("{}={}".format(key, val)
+                          for key, val in self.named_arguments.items())
+        if len(args) > 0:
+            if len(named):
+                args += "," + named
+        else:
+            args = named
+        s = "{}({})".format(self.tablename(), args)
         if self.table.modal is not None:
             s = "{}[{}]".format(self.table.modal, s)
         if self.negated:
@@ -481,31 +650,51 @@ class Literal (object):
             return self.negated < other.negated
         if len(self.arguments) != len(other.arguments):
             return len(self.arguments) < len(other.arguments)
-        return self.arguments < other.arguments
+        if len(self.named_arguments) != len(other.named_arguments):
+            return len(self.named_arguments) < len(other.named_arguments)
+        # final case
+        # explicitly convert OrderedDict to list for comparison
+
+        def od_list(input):
+            return (
+                list(input.items()) if isinstance(
+                    input, collections.OrderedDict)
+                else input)
+
+        return (self.arguments < other.arguments or
+                od_list(self.named_arguments) < od_list(other.named_arguments))
 
     def __eq__(self, other):
         return (isinstance(other, Literal) and
                 self.table == other.table and
                 self.negated == other.negated and
                 len(self.arguments) == len(other.arguments) and
-                all(self.arguments[i] == other.arguments[i]
-                    for i in xrange(0, len(self.arguments))))
+                self.arguments == other.arguments and
+                self.named_arguments == other.named_arguments)
 
     def __ne__(self, other):
         return not self == other
 
     def __repr__(self):
-        return ("Literal(table={}, arguments={}, negated={})").format(
-            repr(self.table),
-            "[" + ",".join(repr(arg) for arg in self.arguments) + "]",
-            repr(self.negated))
+        named = ",".join("%r: %r" % (key, value)
+                         for key, value in self.named_arguments.items())
+        named = "{" + named + "}"
+        args = ",".join(repr(arg) for arg in self.arguments)
+        args = "[" + args + "]"
+        return ("Literal(table={}, arguments={}, negated={}, "
+                "named_arguments={})").format(
+            repr(self.table), args, repr(self.negated), named)
 
     def __hash__(self):
         if self._hash is None:
+            args = tuple([hash(a) for a in self.arguments])
+            named = tuple([(hash(key), hash(value))
+                           for key, value in self.named_arguments.items()])
             self._hash = hash(('Literal',
                                hash(self.table),
-                               tuple([hash(a) for a in self.arguments]),
-                               hash(self.negated)))
+                               args,
+                               hash(self.negated),
+                               named))
         return self._hash
 
     def is_negated(self):
@@ -518,16 +707,19 @@ class Literal (object):
         return False
 
     def variable_names(self):
+        """Return variable names in arguments.  Ignores named_arguments."""
         return set([x.name for x in self.arguments if x.is_variable()])
 
     def variables(self):
+        """Return variables in arguments.  Ignores named_arguments."""
         return set([x for x in self.arguments if x.is_variable()])
 
     def is_ground(self):
+        """Return True if all args are non-vars.  Ignores named_arguments."""
         return all(not arg.is_variable() for arg in self.arguments)
 
     def plug(self, binding, caller=None):
-        """Assumes domain of BINDING is Terms."""
+        """Assumes domain of BINDING is Terms.  Ignores named_arguments."""
         new = copy.copy(self)
         if isinstance(binding, dict):
             args = []
@@ -545,6 +737,7 @@ class Literal (object):
             return new
 
     def argument_names(self):
+        """Return names of all arguments.  Ignores named_arguments."""
         return tuple([arg.name for arg in self.arguments])
 
     def complement(self):
@@ -587,9 +780,13 @@ class Literal (object):
     def is_update(self):
         return self.table.is_update()
 
-    def is_builtin(self):
-        return congressbuiltin.builtin_registry.is_builtin(self.table,
-                                                           len(self.arguments))
+    def is_builtin(self, check_arguments=True):
+        if check_arguments:
+            return congressbuiltin.builtin_registry.is_builtin(
+                self.table, len(self.arguments))
+        else:
+            return congressbuiltin.builtin_registry.is_builtin(
+                self.table)
 
     def tablename(self, default_service=None):
         return self.table.name(default_service)
@@ -602,6 +799,90 @@ class Literal (object):
         self._hash = None
         self.table.drop_service()
         return self
+
+    def eliminate_column_references(self, schema, index, prefix=''):
+        """Expand column references to traditional datalog positional args.
+
+        Returns a new literal, unless no column references.
+        """
+        # corner cases
+        if len(self.named_arguments) == 0:
+            return self
+        if schema is None:
+            raise exception.IncompleteSchemaException(
+                "Literal %s uses named arguments, but the "
+                "schema is unknown." % self)
+        if self.table.table not in schema:
+            raise exception.IncompleteSchemaException(
+                "Literal {} uses unknown table {} "
+                "from schema {}".format(
+                    str(self), str(self.table.table), str(schema)))
+
+        # check if named arguments conflict with positional or named arguments
+        errors = []
+        term_index = {}
+        for col, arg in six.iteritems(self.named_arguments):
+            if isinstance(col, six.string_types):  # column name
+                index = schema.column_number(self.table.table, col)
+                if index is None:
+                    errors.append(exception.PolicyException(
+                        "In literal {} column name {} does not exist".format(
+                            str(self), col)))
+                    continue
+                if index < len(self.arguments):
+                    errors.append(exception.PolicyException(
+                        "In literal {} column name {} references position {},"
+                        " which is already provided by position.".format(
+                            str(self), col, index)))
+                if index in self.named_arguments:
+                    errors.append(exception.PolicyException(
+                        "In literal {} column name {} references position {}, "
+                        "which is also referenced by number.))".format(
+                            str(self), col, index)))
+                if index in term_index:
+                    # should have already caught this case above
+                    errors.append(exception.PolicyException(
+                        "In literal {}, column name {} references position {},"
+                        " which already has reference {}".format(
+                            str(self), col, index, str(term_index[index]))))
+                term_index[index] = arg
+            else:  # column number
+                if col >= schema.arity(self.table.table):
+                    errors.append(exception.PolicyException(
+                        "In literal {} column index {} is too large".format(
+                            str(self), col)))
+                if col < len(self.arguments):
+                    errors.append(exception.PolicyException(
+                        "In literal {} column index {} "
+                        " is already provided by position.".format(
+                            str(self), col)))
+                name = schema.column_name(self.table.table, col)
+                if name in self.named_arguments:
+                    errors.append(exception.PolicyException(
+                        "In literal {} column index {} references column {}, "
+                        "which is also referenced by name.))".format(
+                            str(self), col, name)))
+                if col in term_index:
+                    # should have already caught this case above
+                    errors.append(exception.PolicyException(
+                        "In literal {} column index {} already has a reference"
+                        " {}".format(str(self), col, str(term_index[col]))))
+                term_index[col] = arg
+        if errors:
+            raise exception.PolicyException(
+                " ".join(str(err) for err in errors))
+
+        # turn reference args into position args
+        position_args = list(self.arguments)  # copy the original list
+        for i in range(len(position_args), schema.arity(self.table.table)):
+            term = term_index.get(i, None)
+            if term is None:
+                term = Variable("%s%s" % (prefix, i))
+            position_args.append(term)
+        newlit = self.__copy__()
+        newlit.named_arguments = collections.OrderedDict()
+        newlit.arguments = position_args
+        return newlit
 
 
 @functools.total_ordering
@@ -722,12 +1003,14 @@ class Rule(object):
         self._hash = None
         return self
 
-    def tablenames(self, theory=None, body_only=False, include_builtin=False):
+    def tablenames(self, theory=None, body_only=False, include_builtin=False,
+                   include_modal=True):
         """Return all the tablenames occurring in this rule."""
         result = set()
         if not body_only:
             for lit in self.heads:
-                result.add(lit.tablename(theory))
+                if include_modal or not lit.table.modal:
+                    result.add(lit.tablename(theory))
         for lit in self.body:
             if include_builtin or not lit.is_builtin():
                 result.add(lit.tablename(theory))
@@ -781,6 +1064,45 @@ class Rule(object):
     def is_update(self):
         return self.head.is_update()
 
+    def eliminate_column_references(self, theories, default_theory=None):
+        """Return version of SELF where all column references have been removed.
+
+        Throws exception if RULE is inconsistent with schemas.
+        """
+
+        pre = self._unused_variable_prefix()
+        heads = []
+        for i in range(0, len(self.heads)):
+            heads.append(self.heads[i].eliminate_column_references(
+                literal_schema(self.heads[i], theories, default_theory),
+                i, prefix='%s%s' % (pre, i)))
+
+        body = []
+        for i in range(0, len(self.body)):
+            body.append(self.body[i].eliminate_column_references(
+                literal_schema(self.body[i], theories, default_theory),
+                i, prefix='%s%s' % (pre, i)))
+
+        return Rule(heads, body, self.location, name=self.name,
+                    comment=self.comment, original_str=self.original_str)
+
+    def _unused_variable_prefix(self):
+        """Get unused variable prefix.
+
+        Returns variable prefix (string) that is used by no other variable
+        in the rule.
+        """
+        variables = self.variable_names()
+        found = False
+        prefix = "x_"
+        while not found:
+            if next((var for var in variables if var.startswith(prefix)),
+                    False):
+                prefix += "_"
+            else:
+                found = True
+        return prefix
+
 
 class Event(object):
     """Represents a change to a formula."""
@@ -798,8 +1120,8 @@ class Event(object):
     def is_insert(self):
         return self.insert
 
-    def tablename(self):
-        return self.formula.tablename()
+    def tablename(self, default_theory=None):
+        return self.formula.tablename(default_theory)
 
     def __str__(self):
         if self.insert:
@@ -1209,8 +1531,17 @@ def fact_errors(atom, theories=None, theory=None):
     if not atom.is_ground():
         errors.append(exception.PolicyException(
             "Fact not ground: " + str(atom)))
-    errors.extend(literal_schema_consistency(atom, theories, theory))
+    errors.extend(check_schema_consistency(atom, theories, theory))
     errors.extend(fact_has_no_theory(atom))
+    errors.extend(keywords_safety(atom))
+    return errors
+
+
+def keywords_safety(lit):
+    errors = []
+    if lit.is_builtin(check_arguments=False):
+        errors.append(exception.PolicyException(
+            "Conflict with built-in tablename: " + str(lit.table)))
     return errors
 
 
@@ -1304,6 +1635,30 @@ def rule_body_safety(rule):
         return [e]
 
 
+def literal_schema(literal, theories, default_theory=None):
+    """Return the schema that applies to LITERAL or None."""
+    if theories is None:
+        return
+    # figure out theory that pertains to this literal
+    active_theory = literal.table.service or default_theory
+    # if current theory is unknown, no schema
+    if active_theory is None:
+        return
+    # if theory is known, still need to check if schema is known
+    if active_theory not in theories:
+        # May not have been created yet
+        return
+    # return schema
+    return theories[active_theory].schema
+
+
+def schema_consistency(thing, theories, theory=None):
+    if thing.is_atom():
+        return literal_schema_consistency(thing, theories, theory)
+    else:
+        return rule_schema_consistency(thing, theories, theory)
+
+
 def rule_schema_consistency(rule, theories, theory=None):
     """Returns list of problems with rule's schema."""
     assert not rule.is_atom(), "rule_schema_consistency expects a rule"
@@ -1314,8 +1669,12 @@ def rule_schema_consistency(rule, theories, theory=None):
 
 
 def literal_schema_consistency(literal, theories, theory=None):
-    """Returns list of errors."""
+    """Returns list of errors, but does no checking if column references."""
     if theories is None:
+        return []
+
+    # These checks are handled by eliminate_column_references
+    if len(literal.named_arguments) > 0:
         return []
 
     # figure out theory that pertains to this literal
@@ -1336,20 +1695,17 @@ def literal_schema_consistency(literal, theories, theory=None):
         return []
 
     # check if known table
-    if literal.table.table not in schema:
+    if schema.complete and literal.table.table not in schema:
         if schema.complete:
             return [exception.PolicyException(
                 "Literal {} uses unknown table {} "
                 "from policy {}".format(
                     str(literal), str(literal.table.table),
                     str(active_theory)))]
-        else:
-            # may not have a declaration for this table's columns
-            return []
 
     # check width
     arity = schema.arity(literal.table.table)
-    if arity and len(literal.arguments) != arity:
+    if arity is not None and len(literal.arguments) != arity:
         return [exception.PolicyException(
             "Literal {} contained {} arguments but only "
             "{} arguments are permitted".format(
@@ -1358,14 +1714,29 @@ def literal_schema_consistency(literal, theories, theory=None):
     return []
 
 
+def check_schema_consistency(item, theories, theory=None):
+    errors = []
+    if item.is_rule():
+        errors.extend(literal_schema_consistency(
+            item.head, theories, theory))
+        for lit in item.body:
+            errors.extend(literal_schema_consistency(
+                lit, theories, theory))
+    else:
+        errors.extend(literal_schema_consistency(
+            item, theories, theory))
+    return errors
+
+
 def rule_errors(rule, theories=None, theory=None):
     """Returns list of errors for RULE."""
     errors = []
     errors.extend(rule_head_safety(rule))
     errors.extend(rule_body_safety(rule))
-    errors.extend(rule_schema_consistency(rule, theories, theory))
+    errors.extend(check_schema_consistency(rule, theories, theory))
     errors.extend(rule_head_has_no_theory(rule))
     errors.extend(rule_modal_safety(rule))
+    errors.extend(keywords_safety(rule.head))
     return errors
 
 
@@ -1572,19 +1943,17 @@ class DatalogSyntax(object):
 
     def create_rule(self, antlr):
         # (RULE (AND1 AND2))
-        prefix = self.unused_variable_prefix(antlr)
-        heads = self.create_and_literals(antlr.children[0], prefix)
-        body = self.create_and_literals(antlr.children[1], prefix)
+        heads = self.create_and_literals(antlr.children[0])
+        body = self.create_and_literals(antlr.children[1])
         loc = utils.Location(line=antlr.children[0].token.line,
                              col=antlr.children[0].token.charPositionInLine)
         return Rule(heads, body, location=loc)
 
-    def create_and_literals(self, antlr, prefix):
+    def create_and_literals(self, antlr):
         # (AND (LIT1 ... LITN))
-        return [self.create_literal(child, index, prefix)
-                for (index, child) in enumerate(antlr.children)]
+        return [self.create_literal(child) for child in antlr.children]
 
-    def create_literal(self, antlr, index=-1, prefix=''):
+    def create_literal(self, antlr):
         # (NOT <atom>)
         # <atom>
         # (NOT (MODAL ID <atom>))
@@ -1595,11 +1964,11 @@ class DatalogSyntax(object):
         else:
             negated = False
 
-        lit = self.create_modal_atom(antlr, index, prefix)
+        lit = self.create_modal_atom(antlr)
         lit.negated = negated
         return lit
 
-    def create_modal_atom(self, antlr, index=-1, prefix=''):
+    def create_modal_atom(self, antlr):
         # (MODAL ID <atom>)
         # <atom>
         if antlr.getText() == 'MODAL':
@@ -1608,48 +1977,42 @@ class DatalogSyntax(object):
         else:
             modal = None
             atom = antlr
-        (table, args, loc) = self.create_atom_aux(atom, index, prefix)
+        (table, args, named, loc) = self.create_atom_aux(atom)
         table.modal = modal
-        return Literal(table, args, location=loc, use_modules=self.use_modules)
+        return Literal(table, args, location=loc,
+                       use_modules=self.use_modules,
+                       named_arguments=named)
 
-    def create_atom_aux(self, antlr, index, prefix):
+    def create_atom_aux(self, antlr):
         # (ATOM (TABLENAME ARG1 ... ARGN))
         table = self.create_tablename(antlr.children[0])
         loc = utils.Location(line=antlr.children[0].token.line,
                              col=antlr.children[0].token.charPositionInLine)
-
-        # Construct args (without column references)
-        has_named_param = any(x for x in antlr.children
-                              if x.getText() == 'NAMED_PARAM')
-
-        # Find the schema for this table if we know it.
-        columns = None
-        if table.service in self.theories:
-            schema = self.theories[table.service].schema
-            if schema is not None and table.table in schema:
-                columns = schema.columns(table.table)
         # Compute the args, after having converted them to Terms
-        args = []
-        if columns is None:
-            if has_named_param:
-                self.errors.append(exception.PolicyException(
-                    "Atom {} uses named parameters but the columns for "
-                    "table {} have not been declared.".format(
-                        self.antlr_atom_str(antlr), str(table))))
-            else:
-                args = [self.create_term(antlr.children[i])
-                        for i in xrange(1, len(antlr.children))]
-        else:
-            args = self.create_atom_arg_list(antlr, index, prefix, columns)
-        return (table, args, loc)
+#         args = []
+#         if columns is None:
+#             if has_named_param:
+#                 self.errors.append(exception.PolicyException(
+#                     "Atom {} uses named parameters but the columns for "
+#                     "table {} have not been declared.".format(
+#                         self.antlr_atom_str(antlr), str(table))))
+#             else:
+#                 args = [self.create_term(antlr.children[i])
+#                         for i in range(1, len(antlr.children))]
+#         else:
+#             args = self.create_atom_arg_list(antlr, index, prefix, columns)
+#         return (table, args, loc)
+# =======
+        pos_args, named_args = self.create_atom_dual_arg_list(antlr)
+        return (table, pos_args, named_args, loc)
 
-    def create_atom_arg_list(self, antlr, index, prefix, columns):
-        """Get parameter list representation in atom.
+    def create_atom_dual_arg_list(self, antlr):
+        """Get parameter list and named list
 
-        Return a list of compile.Term representing the parameter list
-        specified in atom ANTLR.  If there are errors, the empty list
-        is returned and self.errors is modified; otherwise,
-        the length of the return list is len(COLUMNS).
+        Return (i) a list of compile.Term representing the positionally
+        specified parameters in the ANTLR atom and (ii) a dictionary mapping
+        string/number to compile.Term representing the name/index-specified
+        parameters. If there are errors self.errors is modified.
         """
         # (ATOM (TABLENAME ARG1 ... ARGN))
         # construct string representation of atom for error messages
@@ -1658,19 +2021,18 @@ class DatalogSyntax(object):
         # partition into regular args and column-ref args
         errors = []
         position_args = []
-        reference_args = []
-        for i in xrange(1, len(antlr.children)):
+        first_col_ref_index = len(antlr.children)  # default save
+        for i in range(1, len(antlr.children)):
             if antlr.children[i].getText() != 'NAMED_PARAM':
                 position_args.append(self.create_term(antlr.children[i]))
             else:
-                reference_args = antlr.children[i:]
+                first_col_ref_index = i
                 break
 
         # index the column refs and translate into Terms
-        names = {}
-        numbers = {}
-        column_int = dict([reversed(x) for x in enumerate(columns)])
-        for param in reference_args:
+        reference_args = {}
+        for i in range(first_col_ref_index, len(antlr.children)):
+            param = antlr.children[i]
             # (NAMED_PARAM (COLUMN_REF TERM))
             if param.getText() != 'NAMED_PARAM':
                 errors.append(exception.PolicyException(
@@ -1680,72 +2042,34 @@ class DatalogSyntax(object):
             elif param.children[0].getText() == 'COLUMN_NAME':
                 # (COLUMN_NAME (ID))
                 name = param.children[0].children[0].getText()
-                if name in names:
+                if name in reference_args:
                     errors.append(exception.PolicyException(
                         "In atom {} two values for column name {} "
                         "were provided".format(atomstr, name)))
-                names[name] = self.create_term(param.children[1])
-                if name not in column_int:
-                    errors.append(exception.PolicyException(
-                        "In atom {} column name {} does not exist".format(
-                            atomstr, name)))
-                else:
-                    number = column_int[name]
-                    if number < len(position_args):
-                        errors.append(exception.PolicyException(
-                            "In atom {} column name {} references position {},"
-                            " which is already provided by position "
-                            "arguments.".format(
-                                atomstr, name, str(number))))
+                reference_args[name] = self.create_term(param.children[1])
             else:
                 # (COLUMN_NUMBER (INT))
                 # Know int() will succeed because of lexer
                 number = int(param.children[0].children[0].getText())
-                if number in numbers:
+                if number in reference_args:
                     errors.append(exception.PolicyException(
                         "In atom {} two values for column number {} "
                         "were provided.".format(atomstr, str(number))))
-                numbers[number] = self.create_term(param.children[1])
+                reference_args[number] = self.create_term(param.children[1])
                 if number < len(position_args):
                     errors.append(exception.PolicyException(
                         "In atom {} column number {} is already provided by "
                         "position arguments.".format(
                             atomstr, number)))
-                if number >= len(columns):
-                    errors.append(exception.PolicyException(
-                        "In atom {} column number {} is too large. The "
-                        "permitted column numbers are 0..{} ".format(
-                            atomstr, number, len(columns) - 1)))
         if errors:
             self.errors.extend(errors)
-            return []
-
-        # turn reference args into position args
-        for i in xrange(len(position_args), len(columns)):
-            name = names.get(columns[i], None)  # a Term or None
-            number = numbers.get(i, None)       # a Term or None
-            if name is not None and number is not None:
-                errors.append(exception.PolicyException(
-                    "In atom {} a column was given two values by reference "
-                    "parameters: one by name {} and one by number {}. ".format(
-                        atomstr, name, str(number))))
-            elif name is not None:
-                position_args.append(name)
-            elif number is not None:
-                position_args.append(number)
-            else:
-                newvar = prefix + "x_{}_{}".format(index, i)
-                position_args.append(Variable(newvar))
-        if errors:
-            self.errors.extend(errors)
-            return []
-        return position_args
+        return position_args, reference_args
 
     def antlr_atom_str(self, antlr):
         # (ATOM (TABLENAME ARG1 ... ARGN))
         table = self.create_tablename(antlr.children[0])
         argstrs = []
-        for i in xrange(1, len(antlr.children)):
+        for i in range(1, len(antlr.children)):
             arg = antlr.children[i]
             if arg.getText() == 'NAMED_PARAM':
                 arg = (arg.children[0].children[0].getText() +
@@ -1834,7 +2158,7 @@ class DatalogSyntax(object):
     def atom_vars(self, antlr_atom):
         # (ATOM (TABLENAME ARG1 ... ARGN))
         variables = set()
-        for i in xrange(1, len(antlr_atom.children)):
+        for i in range(1, len(antlr_atom.children)):
             antlr = antlr_atom.children[i]
             op = antlr.getText()
             if op == 'VARIABLE':
@@ -1867,7 +2191,7 @@ def print_tree(tree, text, kids, ind=0):
     function KIDS to compute the children of a given node.
     IND is a number representing the indentation level.
     """
-    print("|" * ind),
+    print(("|" * ind), end=' ')
     print("{}".format(str(text(tree))))
     children = kids(tree)
     if children:

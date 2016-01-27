@@ -16,6 +16,7 @@ import copy
 
 from congress.datalog import analysis
 from congress.datalog import compile
+from congress.datalog import utility
 from congress import exception
 from congress.policy_engines import agnostic
 from congress.tests import base
@@ -28,12 +29,12 @@ class TestParser(base.TestCase):
         """Test correct parsing of tablenames."""
         p = compile.parse1('p(1)')
         self.assertEqual(p.table.table, 'p')
-        self.assertEqual(p.table.modal, None)
-        self.assertEqual(p.table.service, None)
+        self.assertIsNone(p.table.modal)
+        self.assertIsNone(p.table.service)
 
         p = compile.parse1('nova:p(1)')
         self.assertEqual(p.table.table, 'p')
-        self.assertEqual(p.table.modal, None)
+        self.assertIsNone(p.table.modal)
         self.assertEqual(p.table.service, 'nova')
 
         p = compile.parse1('execute[nova:p(1)]')
@@ -159,14 +160,19 @@ class TestParser(base.TestCase):
         self.assertRaises(exception.PolicyException, compile.parse1,
                           'insert[nonexistent[p(x)] :- q(x)]')
 
+
+class TestColumnReferences(base.TestCase):
+
+    class SchemaWrapper (object):
+        """Placeholder so we don't use the actual policy-engine for tests."""
+        def __init__(self, schema):
+            self.schema = schema
+
     def test_column_references_lowlevel(self):
         """Test column-references with low-level checks."""
         # do the first one the painful way, to ensure the parser
         #   is doing something reasonable.
         run = agnostic.Runtime()
-        run.create_policy('nova')
-        nova_schema = compile.Schema({'q': ('id', 'name', 'status')})
-        run.set_schema('nova', nova_schema, complete=True)
         code = ("p(x) :- nova:q(id=x)")
         actual = run.parse(code)
         self.assertEqual(len(actual), 1)
@@ -179,101 +185,52 @@ class TestParser(base.TestCase):
         lit = rule.body[0]
         self.assertFalse(lit.is_negated())
         self.assertEqual(lit.table.table, "q")
-        self.assertEqual(len(lit.arguments), 3)
-        self.assertEqual(lit.arguments[0].name, 'x')
-        self.assertNotEqual(lit.arguments[0].name, lit.arguments[1].name)
-        self.assertNotEqual(lit.arguments[0].name, lit.arguments[2].name)
-        self.assertNotEqual(lit.arguments[1].name, lit.arguments[2].name)
+        self.assertIsNone(lit.table.modal)
+        self.assertEqual(lit.table.service, 'nova')
+        self.assertEqual(len(lit.arguments), 0)
+        self.assertEqual(len(lit.named_arguments), 1)
+        self.assertTrue('id' in lit.named_arguments)
+        self.assertEqual(lit.named_arguments['id'].name, 'x')
 
-    def test_column_references_atom(self):
-        """Test column references occurring in a single atom in a rule."""
-        run = agnostic.Runtime()
-        run.create_policy('nova')
-        nova_schema = compile.Schema({'q': ('id', 'name', 'status')})
-        run.set_schema('nova', nova_schema, complete=True)
+    def test_hash(self):
+        x = set()
+        x.add(compile.parse1('p(x, y) :- nova:q(x, id=y)'))
+        x.add(compile.parse1('p(x, y) :- nova:q(x, id=y)'))
+        self.assertEqual(len(x), 1)
+        self.assertTrue(compile.parse1('p(x, y) :- nova:q(x, id=y)') in x)
+        x.discard(compile.parse1('p(x, y) :- nova:q(x, id=y)'))
+        self.assertEqual(len(x), 0)
 
-        # Multiple column names
-        code = ("p(x) :- nova:q(id=x, status=y)")
-        actual = run.parse(code)
-        correct = "p(x) :- nova:q(x, w, y)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Multiple column names')
+    def test_lessthan(self):
+        x = compile.parse1('nova:q(x)')
+        y = compile.parse1('nova:q(x, id=y)')
+        self.assertTrue(x < y)
 
-        # Multiple column numbers
-        code = ("p(x) :- nova:q(0=x, 1=y, 2=z)")
-        actual = run.parse(code)
-        correct = "p(x) :- nova:q(x, y, z)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Multiple column numbers')
+        x = compile.parse1('nova:q(x)')
+        y = compile.parse1('nova:q(x, id=y)')
+        self.assertFalse(y < x)
 
-        # Mix column names and numbers
-        code = ("p(x) :- nova:q(id=x, 2=y)")
-        actual = run.parse(code)
-        correct = "p(x) :- nova:q(x, w, y)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Mix names and numbers')
+        x = compile.parse1('nova:q(x, id=w)')
+        y = compile.parse1('nova:q(x, id=y)')
+        self.assertTrue(x < y)
 
-        # Object constants
-        code = ("p(x) :- nova:q(id=3, 2=2)")
-        actual = run.parse(code)
-        correct = "p(x) :- nova:q(3, w, 2)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Object constants')
+        x = compile.parse1('nova:q(id=x)')
+        y = compile.parse1('nova:q(id=y)')
+        self.assertTrue(x < y)
 
-        # Out of order
-        code = ("p(x, y) :- nova:q(status=y, id=x)")
-        actual = run.parse(code)
-        correct = "p(x, y) :- nova:q(x, z, y)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Out of order')
+        x = compile.parse1('nova:q(id=x)')
+        y = compile.parse1('nova:q(id=y, status=z)')
+        self.assertTrue(x < y)
 
-        # Out of order with numbers
-        code = ("p(x, y) :- nova:q(1=y, 0=x)")
-        actual = run.parse(code)
-        correct = "p(x, y) :- nova:q(x, y, z)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Out of order with numbers')
+        x = compile.parse1('p(x, y) :- nova:q(x, id=y)')
+        y = compile.parse1('p(x, y) :- nova:q(x, id=y, status=z)')
+        self.assertTrue(x < y)
 
-        # Positional plus named
-        code = ("p(x, y) :- nova:q(x, status=y)")
-        actual = run.parse(code)
-        correct = "p(x, y) :- nova:q(x, z, y)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Positional plus named')
-
-        # Positional plus named 2
-        code = ("p(x, y, z) :- nova:q(x, y, 2=z)")
-        actual = run.parse(code)
-        correct = "p(x, y, z) :- nova:q(x, y, z)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Positional plus named 2')
-
-        # Pure positional (different since we are providing schema)
-        code = ("p(x, y, z) :- nova:q(x, y, z)")
-        actual = run.parse(code)
-        correct = "p(x, y, z) :- nova:q(x, y, z)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Pure positional')
-
-        # Pure positional (without schema)
-        code = ("p(x) :- nova:q(x, y, z)")
-        run.delete_policy('nova')
-        actual = run.parse(code)
-        correct = "p(x) :- nova:q(x, y, z)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Pure positional without schema')
-
-    def test_column_references_atom_errors(self):
+    def test_column_references_parse_errors(self):
         """Test invalid column references occurring in a single atom."""
-        run = agnostic.Runtime()
-        run.create_policy('nova')
-        schema = compile.Schema({'q': ('id', 'name', 'status'),
-                                 'r': ('id', 'age', 'weight')})
-        run.set_schema('nova', schema, complete=True)
-
         def check_err(code, errmsg, msg):
             try:
-                run.parse(code)
+                compile.parse(code)
                 self.fail("Error should have been thrown but was not: " + msg)
             except exception.PolicyException as e:
                 emsg = "Err message '{}' should include '{}'".format(
@@ -281,24 +238,9 @@ class TestParser(base.TestCase):
                 self.assertTrue(errmsg in str(e), msg + ": " + emsg)
 
         check_err(
-            'p(x) :- q(id=x, 0=y)',
-            'columns for table q have not been declared',
-            'Missing schema')
-
-        check_err(
-            'p(x) :- nova:q(id=x, birthday=y)',
-            'column name birthday does not exist',
-            'Unknown column name')
-
-        check_err(
             'p(x) :- nova:q(id=x, status=x, id=y)',
             'two values for column name id',
             'Multiple values for column name')
-
-        check_err(
-            'p(x) :- nova:q(4=y)',
-            'column number 4 is too large',
-            'Large column number')
 
         check_err(
             'p(x) :- nova:q(4=y, id=w, 4=z)',
@@ -306,64 +248,154 @@ class TestParser(base.TestCase):
             'Multiple values for column number')
 
         check_err(
-            'p(x) :- nova:q(id=x, 0=y)',
-            'column was given two values by reference parameters',
-            'Conflict between name and number references')
-
-        check_err(
-            'p(x) :- nova:q(x, y, id=z)',
-            'already provided by position arguments',
-            'Conflict between name and position')
+            'p(x) :- nova:q(x, 1=z, y)',
+            'positional parameter after a reference parameter',
+            'Positional parameter after reference parameter')
 
         check_err(
             'p(x) :- nova:q(x, y, 1=z)',
             '1 is already provided by position arguments',
             'Conflict between name and position')
 
+    def test_column_references_validation_errors(self):
+        """Test invalid column references occurring in a single atom."""
+        schema = compile.Schema({'q': ('id', 'name', 'status'),
+                                 'r': ('id', 'age', 'weight')},
+                                complete=True)
+        theories = {'nova': self.SchemaWrapper(schema)}
+
+        def check_err(rule, errmsg, msg):
+            rule = compile.parse1(rule)
+            try:
+                rule.eliminate_column_references(theories)
+                self.fail("Failed to throw error {}".format(errmsg))
+            except (exception.PolicyException,
+                    exception.IncompleteSchemaException) as e:
+                emsg = "Err messages '{}' should include '{}'".format(
+                    str(e), errmsg)
+                self.assertTrue(errmsg in str(e), msg + ": " + emsg)
+
         check_err(
-            'p(x) :- nova:q(x, 1=z, y)',
-            'positional parameter after a reference parameter',
-            'Positional parameter after reference parameter')
+            'p(x) :- nova:missing(id=x)',
+            'uses unknown table missing',
+            'Unknown table')
+
+        check_err(
+            'p(x) :- nova:q(id=x, birthday=y)',
+            'column name birthday does not exist',
+            'Unknown column name')
+
+        check_err(
+            'p(x) :- nova:q(4=y)',
+            'column index 4 is too large',
+            'Large column number')
+
+        check_err(
+            'p(x) :- nova:q(id=x, 0=y)',
+            'index 0 references column id, which is also referenced by name',
+            'Conflict between name and number references')
+
+        check_err(
+            'p(x) :- nova:q(x, y, id=z)',
+            'already provided by position',
+            'Conflict between name and position')
+
+        theories = {}
+        check_err(
+            'p(x) :- nova:missing(id=x)',
+            'schema is unknown',
+            'Missing schema')
+
+    def test_column_references_atom(self):
+        """Test column references occurring in a single atom in a rule."""
+        def check(code, correct, msg):
+            actual = compile.parse1(code).eliminate_column_references(theories)
+            eq = helper.datalog_same(str(actual), correct)
+            self.assertTrue(eq, msg)
+
+        run = agnostic.Runtime()
+        run.create_policy('nova')
+        schema = compile.Schema({'q': ('id', 'name', 'status')})
+        theories = {'nova': self.SchemaWrapper(schema)}
+
+        # Multiple column names
+        code = ("p(x) :- nova:q(id=x, status=y)")
+        correct = "p(x) :- nova:q(x, w, y)"
+        check(code, correct, 'Multiple column names')
+
+        # Multiple column numbers
+        code = ("p(x) :- nova:q(0=x, 1=y, 2=z)")
+        correct = "p(x) :- nova:q(x, y, z)"
+        check(code, correct, 'Multiple column numbers')
+
+        # Mix column names and numbers
+        code = ("p(x) :- nova:q(id=x, 2=y)")
+        correct = "p(x) :- nova:q(x, w, y)"
+        check(code, correct, 'Mix names and numbers')
+
+        # Object constants
+        code = ("p(x) :- nova:q(id=3, 2=2)")
+        correct = "p(x) :- nova:q(3, w, 2)"
+        check(code, correct, 'Object constants')
+
+        # Out of order
+        code = ("p(x, y) :- nova:q(status=y, id=x)")
+        correct = "p(x, y) :- nova:q(x, z, y)"
+        check(code, correct,  'Out of order')
+
+        # Out of order with numbers
+        code = ("p(x, y) :- nova:q(1=y, 0=x)")
+        correct = "p(x, y) :- nova:q(x, y, z)"
+        check(code, correct, 'Out of order with numbers')
+
+        # Positional plus named
+        code = ("p(x, y) :- nova:q(x, status=y)")
+        correct = "p(x, y) :- nova:q(x, z, y)"
+        check(code, correct, 'Positional plus named')
+
+        # Positional plus named 2
+        code = ("p(x, y, z) :- nova:q(x, y, 2=z)")
+        correct = "p(x, y, z) :- nova:q(x, y, z)"
+        check(code, correct, 'Positional plus named 2')
+
+        # Pure positional (different since we are providing schema)
+        code = ("p(x, y, z) :- nova:q(x, y, z)")
+        correct = "p(x, y, z) :- nova:q(x, y, z)"
+        check(code, correct, 'Pure positional')
+
+        # Pure positional (without schema)
+        code = ("p(x) :- nova:q(x, y, z)")
+        run.delete_policy('nova')
+        correct = "p(x) :- nova:q(x, y, z)"
+        check(code, correct, 'Pure positional without schema')
 
     def test_column_references_multiple_atoms(self):
         """Test column references occurring in multiple atoms in a rule."""
+        def check(code, correct, msg):
+            actual = compile.parse1(code).eliminate_column_references(theories)
+            eq = helper.datalog_same(str(actual), correct)
+            self.assertTrue(eq, msg)
+
         run = agnostic.Runtime()
         run.create_policy('nova')
         schema = compile.Schema({'q': ('id', 'name', 'status'),
                                  'r': ('id', 'age', 'weight')})
-        run.set_schema('nova', schema, complete=True)
+        theories = {'nova': self.SchemaWrapper(schema)}
 
         # Multiple atoms
         code = ("p(x) :- nova:q(id=x, 2=y), nova:r(id=x)")
-        actual = run.parse(code)
         correct = "p(x) :- nova:q(x, x0, y), nova:r(x, y0, y1)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Multiple atoms')
+        check(code, correct, 'Multiple atoms')
 
         # Multiple atoms sharing column name but different variables
         code = ("p(x) :- nova:q(id=x), nova:r(id=y)")
-        actual = run.parse(code)
         correct = "p(x) :- nova:q(x, x0, x1), nova:r(y, y0, y1)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Multiple atoms shared column name')
+        check(code, correct, 'Multiple atoms shared column name')
 
         # Multiple atoms, same table
         code = ("p(x) :- nova:q(id=x, 2=y), nova:q(id=x)")
-        actual = run.parse(code)
         correct = "p(x) :- nova:q(x, x0, y), nova:q(x, y0, y1)"
-        eq = helper.datalog_same(helper.pol2str(actual), correct)
-        self.assertTrue(eq, 'Multiple atoms, same table')
-
-    def test_use_modules(self):
-        literal = compile.parse1('nova:p(1)', use_modules=False)
-        self.assertEqual(str(literal.table), 'nova:p')
-        self.assertIsNone(literal.table.service)
-
-        rule = compile.parse1('nova:q(x) :- neutron:p(x)', use_modules=False)
-        self.assertEqual(rule.head.table.table, 'nova:q')
-        self.assertEqual(rule.head.table.service, None)
-        self.assertEqual(rule.body[0].table.table, 'neutron:p')
-        self.assertEqual(rule.body[0].table.service, None)
+        check(code, correct, 'Multiple atoms, same table')
 
 
 class TestCompiler(base.TestCase):
@@ -507,6 +539,11 @@ class TestCompiler(base.TestCase):
         errs = compile.rule_errors(rule)
         self.assertEqual(len(set([str(x) for x in errs])), 1)
 
+        # keywords
+        rule = compile.parse1('equal(x) :- q(x)')
+        errs = compile.rule_errors(rule)
+        self.assertEqual(len(set([str(x) for x in errs])), 1)
+
     def test_module_schemas(self):
         """Test that rules are properly checked against module schemas."""
 
@@ -563,6 +600,28 @@ class TestCompiler(base.TestCase):
                   'only 3 arguments are permitted',
                   'Wrong number of arguments for atom',
                   f=compile.fact_errors)
+
+        # schema update
+        schema = compile.Schema()
+        rule1 = compile.parse1('p(x) :- q(x, y)')
+        change1 = schema.update(rule1.head, True)
+        rule2 = compile.parse1('p(x) :- r(x, y)')
+        change2 = schema.update(rule2.head, True)
+        self.assertEqual(schema.count['p'], 2)
+        schema.revert(change2)
+        self.assertEqual(schema.count['p'], 1)
+        schema.revert(change1)
+        self.assertEqual('p' in schema.count, False)
+
+        schema.update(rule1.head, True)
+        schema.update(rule2.head, True)
+        change1 = schema.update(rule1.head, False)
+        change2 = schema.update(rule2.head, False)
+        self.assertEqual('p' in schema.count, False)
+        schema.revert(change2)
+        self.assertEqual(schema.count['p'], 1)
+        schema.revert(change1)
+        self.assertEqual(schema.count['p'], 2)
 
     def test_rule_recursion(self):
         rules = compile.parse('p(x) :- q(x), r(x)  q(x) :- r(x) r(x) :- t(x)')
@@ -688,24 +747,54 @@ class TestDependencyGraph(base.TestCase):
             compile.Event(compile.parse1('c(x) :- a(x)'), insert=False)])
         self.assertFalse(g.has_cycle())
 
+        # cycle enumeration
+        g = compile.RuleDependencyGraph()
+        g.formula_insert(compile.parse1('p(x) :- q(x), r(x)'))
+        g.formula_insert(compile.parse1('q(x) :- t(x), not s(x)'))
+        g.formula_insert(compile.parse1('t(x) :- t(x), p(x), q(x)'))
+        self.assertTrue(g.has_cycle())
+        self.assertEqual(len(g.cycles()), 3)
+        expected_cycle_set = set([
+            utility.Cycle(['p', 'q', 't', 'p']),
+            utility.Cycle(['q', 't', 'q']),
+            utility.Cycle(['t', 't'])
+        ])
+        actual_cycle_set = set([
+            utility.Cycle(g.cycles()[0]),
+            utility.Cycle(g.cycles()[1]),
+            utility.Cycle(g.cycles()[2])
+        ])
+        self.assertEqual(expected_cycle_set, actual_cycle_set)
+
     def test_dependencies(self):
         g = compile.RuleDependencyGraph()
         g.formula_insert(compile.parse1('p(x) :- q(x), r(x)'))
         g.formula_insert(compile.parse1('q(x) :- t(x), not s(x)'))
-        self.assertTrue(g.dependencies('p'), set(['p', 'q', 'r', 't', 's']))
-        self.assertTrue(g.dependencies('q'), set(['q', 't', 's']))
-        self.assertTrue(g.dependencies('r'), set(['r']))
-        self.assertTrue(g.dependencies('t'), set(['t']))
-        self.assertTrue(g.dependencies('s'), set(['s']))
+        self.assertEqual(g.dependencies('p'), set(['p', 'q', 'r', 't', 's']))
+        self.assertEqual(g.dependencies('q'), set(['q', 't', 's']))
+        self.assertEqual(g.dependencies('r'), set(['r']))
+        self.assertEqual(g.dependencies('t'), set(['t']))
+        self.assertEqual(g.dependencies('s'), set(['s']))
+
+        # cyclic case
+        g = compile.RuleDependencyGraph()
+        g.formula_insert(compile.parse1('p(x) :- q(x), r(x)'))
+        g.formula_insert(compile.parse1('q(x) :- t(x), not s(x)'))
+        g.formula_insert(compile.parse1('t(x) :- t(x), p(x), q(x)'))
+        self.assertEqual(g.dependencies('p'), set(['p', 'q', 'r', 't', 's']))
+        self.assertEqual(g.dependencies('q'), set(['p', 'q', 'r', 't', 's']))
+        self.assertEqual(g.dependencies('r'), set(['r']))
+        self.assertEqual(g.dependencies('t'), set(['p', 'q', 'r', 't', 's']))
+        self.assertEqual(g.dependencies('s'), set(['s']))
 
         g = compile.RuleDependencyGraph(head_to_body=False)
         g.formula_insert(compile.parse1('p(x) :- q(x), r(x)'))
         g.formula_insert(compile.parse1('q(x) :- t(x), not s(x)'))
-        self.assertTrue(g.dependencies('p'), set(['p']))
-        self.assertTrue(g.dependencies('q'), set(['q', 'p']))
-        self.assertTrue(g.dependencies('r'), set(['r', 'p']))
-        self.assertTrue(g.dependencies('t'), set(['t', 'q', 'p']))
-        self.assertTrue(g.dependencies('s'), set(['s', 'q', 'p']))
+        self.assertEqual(g.dependencies('p'), set(['p']))
+        self.assertEqual(g.dependencies('q'), set(['q', 'p']))
+        self.assertEqual(g.dependencies('r'), set(['r', 'p']))
+        self.assertEqual(g.dependencies('t'), set(['t', 'q', 'p']))
+        self.assertEqual(g.dependencies('s'), set(['s', 'q', 'p']))
 
     def test_modal_index(self):
         m = analysis.ModalIndex()

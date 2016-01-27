@@ -70,7 +70,7 @@ def delete_policy(id_, session=None):
     session = session or db.get_session()
     with session.begin(subtransactions=True):
         # delete all rules for that policy from database
-        policy = get_policy(id_, session=session)
+        policy = get_policy_by_id(id_, session=session)
         for rule in get_policy_rules(policy.name, session=session):
             delete_policy_rule(rule.id, session=session)
         # delete the policy
@@ -79,7 +79,7 @@ def delete_policy(id_, session=None):
                 soft_delete())
 
 
-def get_policy(id_, session=None, deleted=False):
+def get_policy_by_id(id_, session=None, deleted=False):
     session = session or db.get_session()
     try:
         return (session.query(Policy).
@@ -90,11 +90,43 @@ def get_policy(id_, session=None, deleted=False):
         pass
 
 
+def get_policy_by_name(name, session=None, deleted=False):
+    session = session or db.get_session()
+    try:
+        return (session.query(Policy).
+                filter(Policy.name == name).
+                filter(Policy.deleted == is_soft_deleted(name, deleted)).
+                one())
+    except db_exc.NoResultFound:
+        pass
+
+
+def get_policy(name_or_id, session=None, deleted=False):
+    # Try to retrieve policy either by id or name
+    db_object = (get_policy_by_id(name_or_id, session, deleted) or
+                 get_policy_by_name(name_or_id, session, deleted))
+    if not db_object:
+        raise KeyError("Policy Name or ID '%s' does not exist" % (name_or_id))
+    return db_object
+
+
 def get_policies(session=None, deleted=False):
     session = session or db.get_session()
     return (session.query(Policy).
             filter(Policy.deleted == '').
             all())
+
+
+def policy_name(name_or_id, session=None):
+    session = session or db.get_session()
+    try:
+        ans = (session.query(Policy).
+               filter(Policy.deleted == '').
+               filter(Policy.id == name_or_id).
+               one())
+    except db_exc.NoResultFound:
+        return name_or_id
+    return ans.name
 
 
 class PolicyRule(model_base.BASE, model_base.HasId, model_base.HasAudit):

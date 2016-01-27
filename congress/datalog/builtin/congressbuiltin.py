@@ -17,8 +17,9 @@
 import datetime
 
 import six
+from six.moves import range
 
-from thirdparty_dateutil import parser as datetime_parser
+from dateutil import parser as datetime_parser
 
 
 class DatetimeBuiltins(object):
@@ -31,7 +32,7 @@ class DatetimeBuiltins(object):
             num_fields = len(fields)
             args = {}
             keys = ['seconds', 'minutes', 'hours', 'days', 'weeks']
-            for i in xrange(0, len(fields)):
+            for i in range(0, len(fields)):
                 args[keys[i]] = int(fields[num_fields - 1 - i])
             return datetime.timedelta(**args)
         else:
@@ -136,7 +137,8 @@ _builtin_map = {
         {'func': 'plus(x,y,z)', 'num_inputs': 2, 'code': lambda x, y: x + y},
         {'func': 'minus(x,y,z)', 'num_inputs': 2, 'code': lambda x, y: x - y},
         {'func': 'mul(x,y,z)', 'num_inputs': 2, 'code': lambda x, y: x * y},
-        {'func': 'div(x,y,z)', 'num_inputs': 2, 'code': lambda x, y: x / y},
+        {'func': 'div(x,y,z)', 'num_inputs': 2, 'code': lambda x, y:
+            ((x // y) if (type(x) == int and type(y) == int) else (x / y))},
         {'func': 'float(x,y)', 'num_inputs': 1, 'code': lambda x: float(x)},
         {'func': 'int(x,y)', 'num_inputs': 1, 'code': lambda x: int(x)}],
     'string': [
@@ -314,9 +316,11 @@ class CongressBuiltinCategoryMap(object):
                 return True
         return False
 
-    def is_builtin(self, table, arity):
+    def is_builtin(self, table, arity=None):
         """Given a Tablename and arity, check if it is a builtin."""
         if table.table in self.preddict:
+            if not arity:
+                return True
             if len(self.preddict[table.table][0].predargs) == arity:
                 return True
         return False

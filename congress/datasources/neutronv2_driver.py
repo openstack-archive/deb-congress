@@ -28,7 +28,7 @@ def d6service(name, keys, inbox, datapath, args):
     return NeutronV2Driver(name, keys, inbox, datapath, args)
 
 
-class NeutronV2Driver(datasource_driver.DataSourceDriver,
+class NeutronV2Driver(datasource_driver.PollingDataSourceDriver,
                       datasource_driver.ExecutionDriver):
 
     NETWORKS = 'networks'
@@ -44,9 +44,24 @@ class NeutronV2Driver(datasource_driver.DataSourceDriver,
     ROUTERS = 'routers'
     SECURITY_GROUP_RULES = 'security_group_rules'
     SECURITY_GROUPS = 'security_groups'
+    FLOATING_IPS = 'floating_ips'
 
     # This is the most common per-value translator, so define it once here.
     value_trans = {'translation-type': 'VALUE'}
+
+    floating_ips_translator = {
+        'translation-type': 'HDICT',
+        'table-name': FLOATING_IPS,
+        'selector-type': 'DICT_SELECTOR',
+        'field-translators':
+            ({'fieldname': 'id', 'translator': value_trans},
+             {'fieldname': 'router_id', 'translator': value_trans},
+             {'fieldname': 'tenant_id', 'translator': value_trans},
+             {'fieldname': 'floating_network_id', 'translator': value_trans},
+             {'fieldname': 'fixed_ip_address', 'translator': value_trans},
+             {'fieldname': 'floating_ip_address', 'translator': value_trans},
+             {'fieldname': 'port_id', 'translator': value_trans},
+             {'fieldname': 'status', 'translator': value_trans})}
 
     networks_translator = {
         'translation-type': 'HDICT',
@@ -217,7 +232,8 @@ class NeutronV2Driver(datasource_driver.DataSourceDriver,
               'translator': security_group_rules_translator})}
 
     TRANSLATORS = [networks_translator, ports_translator, subnets_translator,
-                   routers_translator, security_group_translator]
+                   routers_translator, security_group_translator,
+                   floating_ips_translator]
 
     def __init__(self, name='', keys='', inbox=None,
                  datapath=None, args=None):
@@ -226,7 +242,8 @@ class NeutronV2Driver(datasource_driver.DataSourceDriver,
         datasource_driver.ExecutionDriver.__init__(self)
         self.creds = args
         self.neutron = neutronclient.v2_0.client.Client(**self.creds)
-        self.inspect_builtin_methods(self.neutron, 'neutronclient.v2_0.client')
+        self.add_executable_client_methods(self.neutron,
+                                           'neutronclient.v2_0.client')
         self._init_end_start_poll()
 
     @staticmethod
@@ -257,6 +274,17 @@ class NeutronV2Driver(datasource_driver.DataSourceDriver,
 
         security_groups = self.neutron.list_security_groups()
         self._translate_security_groups(security_groups)
+
+        floating_ips = self.neutron.list_floatingips()
+        self._translate_floating_ips(floating_ips)
+
+    @ds_utils.update_state_on_changed(FLOATING_IPS)
+    def _translate_floating_ips(self, obj):
+        LOG.debug("floating_ips: %s", dict(obj))
+
+        row_data = NeutronV2Driver.convert_objs(obj['floatingips'],
+                                                self.floating_ips_translator)
+        return row_data
 
     @ds_utils.update_state_on_changed(NETWORKS)
     def _translate_networks(self, obj):

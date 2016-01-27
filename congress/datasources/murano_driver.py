@@ -35,7 +35,7 @@ def d6service(name, keys, inbox, datapath, args):
     return MuranoDriver(name, keys, inbox, datapath, args)
 
 
-class MuranoDriver(datasource_driver.DataSourceDriver,
+class MuranoDriver(datasource_driver.PollingDataSourceDriver,
                    datasource_driver.ExecutionDriver):
     OBJECTS = "objects"
     PARENT_TYPES = "parent_types"
@@ -55,7 +55,7 @@ class MuranoDriver(datasource_driver.DataSourceDriver,
         logger.debug("Credentials = %s" % self.creds)
         keystone = ksclient.Client(**self.creds)
         murano_endpoint = keystone.service_catalog.url_for(
-            service_type='application_catalog',
+            service_type='application-catalog',
             endpoint_type='publicURL')
         logger.debug("murano_endpoint = %s" % murano_endpoint)
         client_version = "1"
@@ -63,7 +63,9 @@ class MuranoDriver(datasource_driver.DataSourceDriver,
             client_version,
             endpoint=murano_endpoint,
             token=keystone.auth_token)
-        self.inspect_builtin_methods(self.murano_client, 'muranoclient.v1.')
+        self.add_executable_client_methods(
+            self.murano_client,
+            'muranoclient.v1.')
         logger.debug("Successfully created murano_client")
 
         self.action_call_returns = []

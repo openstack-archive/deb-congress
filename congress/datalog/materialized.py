@@ -14,6 +14,7 @@
 #
 
 from oslo_log import log as logging
+from six.moves import range
 
 from congress.datalog import base
 from congress.datalog import compile
@@ -42,7 +43,10 @@ class DeltaRule(object):
                 self.head == other.head and
                 len(self.body) == len(other.body) and
                 all(self.body[i] == other.body[i]
-                    for i in xrange(0, len(self.body))))
+                    for i in range(0, len(self.body))))
+
+    def __hash__(self):
+        return hash((self.trigger, self.head, tuple(self.body)))
 
     def variables(self):
         """Return the set of variables occurring in this delta rule."""
@@ -52,7 +56,8 @@ class DeltaRule(object):
             vs |= atom.variables()
         return vs
 
-    def tablenames(self, body_only=False, include_builtin=False):
+    def tablenames(self, body_only=False, include_builtin=False,
+                   include_modal=True):
         """Return the set of tablenames occurring in this delta rule."""
         tables = set()
         if not body_only:
@@ -218,7 +223,7 @@ class DeltaRuleTheory (base.Theory):
 
         def n_variables(n):
             vars = []
-            for i in xrange(0, n):
+            for i in range(0, n):
                 vars.append("x" + str(i))
             return vars
         # dict from (table name, arity) tuple to
@@ -256,7 +261,7 @@ class DeltaRuleTheory (base.Theory):
         for tablearity in global_self_joins:
             table = tablearity[0]
             arity = tablearity[1]
-            for i in xrange(1, global_self_joins[tablearity] + 1):
+            for i in range(1, global_self_joins[tablearity] + 1):
                 newtable = new_table_name(table, arity, i)
                 args = [compile.Variable(var) for var in n_variables(arity)]
                 head = compile.Literal(newtable, args)
@@ -298,9 +303,11 @@ class MaterializedViewTheory(topdown.TopDownTheory):
     Recursive rules are allowed.
     """
 
-    def __init__(self, name=None, abbr=None, theories=None, schema=None):
+    def __init__(self, name=None, abbr=None, theories=None, schema=None,
+                 desc=None, owner=None):
         super(MaterializedViewTheory, self).__init__(
-            name=name, abbr=abbr, theories=theories, schema=schema)
+            name=name, abbr=abbr, theories=theories, schema=schema,
+            desc=desc, owner=owner)
         # queue of events left to process
         self.queue = base.EventQueue()
         # data storage

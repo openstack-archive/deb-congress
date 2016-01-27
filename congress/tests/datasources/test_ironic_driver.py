@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-import contextlib
-
 import ironicclient.v1.chassis as IrChassis
 import ironicclient.v1.driver as IrDriver
 import ironicclient.v1.node as IrNode
@@ -149,7 +147,7 @@ class TestIronicDriver(base.TestCase):
         self.assertIsNotNone(self.driver.ironic_client)
 
     def test_update_from_datasource(self):
-        with contextlib.nested(
+        with base.nested(
             mock.patch.object(self.driver.ironic_client.chassis,
                               "list",
                               return_value=self.mock_value(self.mock_chassis,
@@ -175,7 +173,7 @@ class TestIronicDriver(base.TestCase):
                   self.driver.ironic_client.port.list,
                   self.driver.ironic_client.driver.list):
             self.driver.update_from_datasource()
-            self.assertEqual(self.driver.state, self.expected_state)
+            self.assertEqual(self.expected_state, self.driver.state)
 
     def test_execute(self):
         class IronicClient(object):
@@ -194,4 +192,4 @@ class TestIronicDriver(base.TestCase):
 
         self.driver.execute('updateNode', api_args)
 
-        self.assertEqual(ironic_client.testkey, expected_ans)
+        self.assertEqual(expected_ans, ironic_client.testkey)

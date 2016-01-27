@@ -26,7 +26,7 @@ def d6service(name, keys, inbox, datapath, args):
     return SwiftDriver(name, keys, inbox, datapath, args)
 
 
-class SwiftDriver(datasource_driver.DataSourceDriver,
+class SwiftDriver(datasource_driver.PollingDataSourceDriver,
                   datasource_driver.ExecutionDriver):
 
     CONTAINERS = "containers"
@@ -64,7 +64,8 @@ class SwiftDriver(datasource_driver.DataSourceDriver,
         datasource_driver.ExecutionDriver.__init__(self)
         options = self.get_swift_credentials_v1(args)
         self.swift_service = swiftclient.service.SwiftService(options)
-        self.inspect_builtin_methods(self.swift_service, 'swiftclient.service')
+        self.add_executable_client_methods(self.swift_service,
+                                           'swiftclient.service')
         self._init_end_start_poll()
 
     @staticmethod

@@ -296,7 +296,7 @@ def check_subscribers(deepsix, subscriber_list):
     all subscribers exist; otherwise returns False.
     """
     actual = set([(name, pubdata.dataindex)
-                  for pubdata in deepsix.pubdata.values()
+                  for pubdata in deepsix.pubdata.copy().values()
                   for name in pubdata.subscribers])
     correct = set(subscriber_list)
     missing = correct - actual
@@ -324,6 +324,6 @@ class FakeRequest(object):
         self.body = json.dumps(body)
 
 
-class FakeServiceObj():
+class FakeServiceObj(object):
     def __init__(self):
         self.state = {}

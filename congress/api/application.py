@@ -41,38 +41,36 @@ class ApiApplication(object):
             handler = self.resource_mgr.get_handler(request)
             if handler:
                 msg = _("Handling request '%(meth)s %(path)s' with %(hndlr)s")
-                LOG.debug(msg, {"meth": request.method, "path": request.path,
-                                "hndlr": handler})
+                LOG.info(msg, {"meth": request.method, "path": request.path,
+                               "hndlr": handler})
                 # TODO(pballand): validation
                 response = handler.handle_request(request)
             else:
                 response = webservice.NOT_FOUND_RESPONSE
         except webservice.DataModelException as e:
             # Error raised based on invalid user input
-            LOG.debug("ApiApplication: found DataModelException %s", e)
+            LOG.exception("ApiApplication: found DataModelException")
             response = e.rest_response()
         except Exception as e:
             # Unexpected error raised by API framework or data model
             msg = _("Exception caught for request: %s")
             LOG.error(msg, request)
-            LOG.error(traceback.format_exc(e))
+            LOG.error(traceback.format_exc())
             response = webservice.INTERNAL_ERROR_RESPONSE
         return response
 
 
 class ResourceManager(object):
-    """A container for REST API resources and underlying data models.
+    """A container for REST API resources.
 
     This container is meant to be called from one or more wsgi servers/ports.
 
     Attributes:
         handlers: An array of API resource handlers for registered resources.
-        models: A dict of {model_id: data_model} for registered data models.
     """
 
     def __init__(self):
         self.handlers = []
-        self.models = {}
 
     def register_handler(self, handler, search_index=None):
         """Register a new resource handler.
@@ -102,17 +100,3 @@ class ResourceManager(object):
             if h.handles_request(request):
                 return h
         return None
-
-    def register_model(self, model_id, model):
-        """Register a data model.
-
-        Args:
-            model_id: A unique ID for the model.
-            model: The model to register.
-        """
-        if model_id in self.models:
-            raise KeyError("Model '%s' already registered" % model_id)
-        self.models[model_id] = model
-
-    def get_model(self, model_id):
-        return self.models.get(model_id)

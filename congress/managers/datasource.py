@@ -22,6 +22,7 @@ from oslo_utils import importutils
 from oslo_utils import uuidutils
 import six
 
+from congress.datalog import base
 from congress.datasources import constants
 from congress.db import api as db
 from congress.db import datasources as datasources_db
@@ -63,7 +64,8 @@ class DataSourceManager(object):
                 engine = cage.service_object('engine')
                 try:
                     LOG.debug("creating policy %s", req['name'])
-                    engine.create_policy(req['name'])
+                    engine.create_policy(req['name'],
+                                         kind=base.DATASOURCE_POLICY_TYPE)
                 except KeyError:
                     # FIXME(arosen): we need a better exception then
                     # key error being raised here
@@ -182,6 +184,52 @@ class DataSourceManager(object):
             return obj.get_schema()
 
     @classmethod
+    def load_module_object(cls, datasource_id_or_name):
+        datasource = datasources_db.get_datasource(datasource_id_or_name)
+        # Ideally speaking, it should change datasource_db.get_datasource() to
+        # be able to retrieve datasource info from db at once. The datasource
+        # table and the method, however, will be removed in the new
+        # architecture, so it use this way. Supporting both name and id is
+        # a backward compatibility.
+        if not datasource:
+            datasource = (datasources_db.
+                          get_datasource_by_name(datasource_id_or_name))
+        if not datasource:
+            return None
+
+        driver = cls.get_driver_info(datasource.driver)
+        obj = importutils.import_class(driver['module'])
+
+        return obj
+
+    @classmethod
+    def get_row_data(cls, table_id, datasource_id, **kwargs):
+        datasource = cls.get_datasource(datasource_id)
+        cage = d6cage.d6Cage()
+        datasource_obj = cage.service_object(datasource['name'])
+        return datasource_obj.get_row_data(table_id)
+
+    @classmethod
+    def get_tablename(cls, datasource_id_or_name, table_id):
+        obj = cls.load_module_object(datasource_id_or_name)
+        if obj:
+            return obj.get_tablename(table_id)
+        else:
+            return None
+
+    @classmethod
+    def get_tablenames(cls, datasource_id_or_name):
+        '''The method to get datasource tablename.'''
+        # In the new architecture, table model would call datasource_driver's
+        # get_tablenames() directly using RPC
+        obj = cls.load_module_object(datasource_id_or_name)
+
+        if obj:
+            return obj.get_tablenames()
+        else:
+            return None
+
+    @classmethod
     def delete_datasource(cls, datasource_id, update_db=True):
         datasource = cls.get_datasource(datasource_id)
         session = db.get_session()
@@ -233,15 +281,6 @@ class DataSourceManager(object):
 
         # If we get here no datasource driver match was found.
         raise InvalidDriver(driver=req)
-
-    @classmethod
-    def create_table_dict(cls, tablename, schema):
-        # FIXME(arosen): Should not be returning None
-        # here for description.
-        cols = [{'name': x, 'description': 'None'}
-                for x in schema[tablename]]
-        return {'table_id': tablename,
-                'columns': cols}
 
     @classmethod
     def request_refresh(cls, datasource_id):

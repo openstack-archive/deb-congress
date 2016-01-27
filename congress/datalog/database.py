@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+from six.moves import range
+
 from congress.datalog import base
 from congress.datalog import compile
 from congress.datalog import topdown
@@ -123,7 +125,7 @@ class Database(topdown.TopDownTheory):
             if len(self.tuple) != len(atom.arguments):
                 return None
             changes = []
-            for i in xrange(0, len(atom.arguments)):
+            for i in range(0, len(atom.arguments)):
                 val, binding = unifier.apply_full(atom.arguments[i])
                 # LOG.debug("val(%s)=%s at %s; comparing to object %s",
                 #     atom.arguments[i], val, binding, self.tuple[i])
@@ -137,9 +139,11 @@ class Database(topdown.TopDownTheory):
                         return None
             return changes
 
-    def __init__(self, name=None, abbr=None, theories=None, schema=None):
+    def __init__(self, name=None, abbr=None, theories=None, schema=None,
+                 desc=None, owner=None):
         super(Database, self).__init__(
-            name=name, abbr=abbr, theories=theories, schema=schema)
+            name=name, abbr=abbr, theories=theories, schema=schema,
+            desc=desc, owner=owner)
         self.data = {}
         self.kind = base.DATABASE_POLICY_TYPE
 
@@ -245,7 +249,8 @@ class Database(topdown.TopDownTheory):
             if dbtuple.tuple == args:
                 return dbtuple.proofs
 
-    def tablenames(self, body_only=False, include_builtin=False):
+    def tablenames(self, body_only=False, include_builtin=False,
+                   include_modal=True):
         """Return all table names occurring in this theory."""
         if body_only:
             return []
@@ -362,7 +367,7 @@ class Database(topdown.TopDownTheory):
         table, dbtuple = self.atom_to_internal(atom, proofs)
         if table not in self.data:
             return
-        for i in xrange(0, len(self.data[table])):
+        for i in range(0, len(self.data[table])):
             existingtuple = self.data[table][i]
             if existingtuple.tuple == dbtuple.tuple:
                 existingtuple.proofs -= dbtuple.proofs

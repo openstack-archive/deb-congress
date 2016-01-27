@@ -56,6 +56,8 @@ class TestNovaDriver(base.TestCase):
             user_id = t[5]
             image_id = t[6]
             flavor_id = t[7]
+            zone = t[8]
+            host_name = t[9]
             self.assertIn(id, [1234, 5678, 9012])
             # see congress.datasources.tests.unit.fakes for actual values
             if id == 1234:
@@ -68,6 +70,8 @@ class TestNovaDriver(base.TestCase):
                                  tenant_id)
                 self.assertEqual(2, image_id)
                 self.assertEqual(1, flavor_id)
+                self.assertEqual('default', zone)
+                self.assertEqual('host1', host_name)
 
             elif id == 5678:
                 self.assertEqual("sample-server2", name)
@@ -79,6 +83,8 @@ class TestNovaDriver(base.TestCase):
                                  tenant_id)
                 self.assertEqual(2, image_id)
                 self.assertEqual(1, flavor_id)
+                self.assertEqual('None', zone)
+                self.assertEqual('None', host_name)
 
             elif id == 9012:
                 self.assertEqual("sample-server3", name)
@@ -90,6 +96,8 @@ class TestNovaDriver(base.TestCase):
                                  tenant_id)
                 self.assertEqual(2, image_id)
                 self.assertEqual(1, flavor_id)
+                self.assertEqual('foo', zone)
+                self.assertEqual('host2', host_name)
 
     def test_flavors(self):
         flavor_raw = self.nova.flavors.list(detailed=True)
@@ -197,6 +205,20 @@ class TestNovaDriver(base.TestCase):
         for s in service_tuples:
             map(self.assertEqual, expected_ret[s[0]], s)
 
+    def test_availability_zones(self):
+        az_list = self.nova.availability_zones.list()
+        self.driver._translate_availability_zones(az_list)
+        expected_ret = {
+            'AZ1': ['AZ1', 'available'],
+            'AZ2': ['AZ2', 'not available']
+        }
+        az_tuples = self.driver.state[self.driver.AVAILABILITY_ZONES]
+
+        self.assertEqual(2, len(az_tuples))
+
+        for az in az_tuples:
+            map(self.assertEqual, expected_ret[az[0]], az)
+
     def test_communication(self):
         """Test for communication.
 
@@ -272,7 +294,7 @@ class TestNovaDriver(base.TestCase):
 
         self.driver.execute('connectNetwork', api_args)
 
-        self.assertEqual(nova_client.testkey, expected_ans)
+        self.assertEqual(expected_ans, nova_client.testkey)
 
     def test_execute_servers_set_meta(self):
         class server(object):
@@ -293,7 +315,7 @@ class TestNovaDriver(base.TestCase):
         action_args = {'positional': ['1', 'meta-key1', 'meta-value1']}
         self.driver.execute('servers_set_meta', action_args)
 
-        self.assertEqual(nova_client.servers.testkey, expected_ans)
+        self.assertEqual(expected_ans, nova_client.servers.testkey)
 
     def test_execute_with_non_executable_method(self):
         action_args = {'positional': ['1', 'meta-key1', 'meta-value1']}

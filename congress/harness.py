@@ -53,6 +53,12 @@ def create(rootdir, config_override=None):
     # path to congress source dir
     src_path = os.path.join(rootdir, "congress")
 
+    if cfg.CONF.distributed_architecture:
+        raise NotImplementedError(
+            'distributed architecture is not implemented yet.')
+    else:
+        datasource_mgr = datasource_manager.DataSourceManager()
+
     # add policy engine
     engine_path = os.path.join(src_path, "policy_engines/agnostic.py")
     LOG.info("main::start() engine_path: %s", engine_path)
@@ -95,7 +101,8 @@ def create(rootdir, config_override=None):
         name="api-table",
         moduleName="API-table",
         description="API-table DSE instance",
-        args={'policy_engine': engine})
+        args={'policy_engine': engine,
+              'datasource_mgr': datasource_mgr})
 
     # add row api
     api_path = os.path.join(src_path, "api/row_model.py")
@@ -105,7 +112,8 @@ def create(rootdir, config_override=None):
         name="api-row",
         moduleName="API-row",
         description="API-row DSE instance",
-        args={'policy_engine': engine})
+        args={'policy_engine': engine,
+              'datasource_mgr': datasource_mgr})
 
     # add status api
     api_path = os.path.join(src_path, "api/status_model.py")
@@ -115,7 +123,8 @@ def create(rootdir, config_override=None):
         name="api-status",
         moduleName="API-status",
         description="API-status DSE instance",
-        args={'policy_engine': engine})
+        args={'policy_engine': engine,
+              'datasource_mgr': datasource_mgr})
 
     # add action api
     api_path = os.path.join(src_path, "api/action_model.py")
@@ -135,17 +144,7 @@ def create(rootdir, config_override=None):
         name="api-schema",
         moduleName="API-schema",
         description="API-schema DSE instance",
-        args={'policy_engine': engine})
-
-    # add datasource/config api
-    api_path = os.path.join(src_path, "api/datasource_config_model.py")
-    LOG.info("main::start() api_path: %s", api_path)
-    cage.loadModule("API-config", api_path)
-    cage.createservice(
-        name="api-config",
-        moduleName="API-config",
-        description="API-config DSE instance",
-        args={'policy_engine': engine})
+        args={'datasource_mgr': datasource_mgr})
 
     # add path for system/datasource-drivers
     api_path = os.path.join(src_path, "api/system/driver_model.py")
@@ -155,7 +154,7 @@ def create(rootdir, config_override=None):
         name="api-system",
         moduleName="API-system",
         description="API-system DSE instance",
-        args={'policy_engine': engine})
+        args={'datasource_mgr': datasource_mgr})
 
     # Load policies from database
     engine.persistent_load_policies()
@@ -193,7 +192,6 @@ def create(rootdir, config_override=None):
 
     # spin up all the configured services, if we have configured them
 
-    datasource_mgr = datasource_manager.DataSourceManager
     drivers = datasource_mgr.get_datasources()
     # Setup cage.config as it previously done when it was loaded
     # from disk. FIXME(arosen) later!
@@ -202,7 +200,7 @@ def create(rootdir, config_override=None):
             LOG.info("module %s not enabled, skip loading", driver['name'])
             continue
         driver_info = datasource_mgr.get_driver_info(driver['driver'])
-        engine.create_policy(driver['name'])
+        engine.create_policy(driver['name'], kind=base.DATASOURCE_POLICY_TYPE)
         try:
             cage.createservice(name=driver['name'],
                                moduleName=driver_info['module'],
@@ -224,6 +222,20 @@ def create(rootdir, config_override=None):
     #  If datasources loaded after this, we don't have schemas.
     engine.persistent_load_rules()
 
+    # Start datasource synchronizer after explicitly starting the
+    # datasources, because the explicit call to create a datasource
+    # will crash if the synchronizer creates the datasource first.
+    synchronizer_path = os.path.join(src_path, "synchronizer.py")
+    LOG.info("main::start() synchronizer: %s", synchronizer_path)
+    cage.loadModule("Synchronizer", synchronizer_path)
+    cage.createservice(
+        name="synchronizer",
+        moduleName="Synchronizer",
+        description="DB synchronizer instance",
+        args={'poll_time': cfg.CONF.datasource_sync_period})
+    synchronizer = cage.service_object('synchronizer')
+    engine.set_synchronizer(synchronizer)
+
     # add datasource api
     api_path = os.path.join(src_path, "api/datasource_model.py")
     LOG.info("main::start() api_path: %s", api_path)
@@ -232,7 +244,9 @@ def create(rootdir, config_override=None):
         name="api-datasource",
         moduleName="API-datasource",
         description="API-datasource DSE instance",
-        args={'policy_engine': engine})
+        args={'policy_engine': engine,
+              'datasource_mgr': datasource_mgr,
+              'synchronizer': synchronizer})
 
     return cage
 

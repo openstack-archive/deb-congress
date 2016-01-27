@@ -14,9 +14,9 @@
 #
 import contextlib
 import logging as python_logging
-import StringIO
 
 from oslo_log import log as logging
+import six
 
 from congress.datalog import utility
 from congress.tests import base
@@ -111,7 +111,7 @@ class TestGraph(base.TestCase):
         self.assertTrue(g.edge_in(1, 2))
         self.assertTrue(g.edge_in(2, 3))
         self.assertTrue(g.edge_in(3, 4))
-        self.assertTrue(isinstance(g, utility.Graph))
+        self.assertIsInstance(g, utility.Graph)
         self.assertTrue(g1.edge_in(1, 2))
         self.assertTrue(g1.edge_in(2, 3))
         self.assertFalse(g1.edge_in(3, 4))
@@ -150,6 +150,32 @@ class TestGraph(base.TestCase):
         self.assertTrue(g1.has_cycle())
         g1.delete_edge(2, 4)
         self.assertFalse(g1.has_cycle())
+
+        actual_cycle_as_set = frozenset(utility.Cycle(['p', 'q', 't', 'p']))
+        expected_cycle_as_set = frozenset([('p', 'q'), ('q', 't'), ('t', 'p')])
+        self.assertEqual(actual_cycle_as_set, expected_cycle_as_set)
+
+        g = utility.Graph()
+        g.add_edge('p', 'q')
+        g.add_edge('p', 'r')
+        g.add_edge('q', 't')
+        g.add_edge('q', 's')
+        g.add_edge('t', 't')
+        g.add_edge('t', 'p')
+        g.add_edge('t', 'q')
+        self.assertTrue(g.has_cycle())
+        self.assertEqual(len(g.cycles()), 3)
+        expected_cycle_set = set([
+            utility.Cycle(['p', 'q', 't', 'p']),
+            utility.Cycle(['q', 't', 'q']),
+            utility.Cycle(['t', 't'])
+        ])
+        actual_cycle_set = set([
+            utility.Cycle(g.cycles()[0]),
+            utility.Cycle(g.cycles()[1]),
+            utility.Cycle(g.cycles()[2])
+        ])
+        self.assertEqual(expected_cycle_set, actual_cycle_set)
 
     def test_dependencies(self):
         g1 = utility.Graph()
@@ -295,7 +321,7 @@ class TestBagGraph(base.TestCase):
         self.assertTrue(g.edge_in(2, 3))
         self.assertTrue(g.edge_in(3, 4))
         self.assertEqual(g.edge_count(2, 3), 2)
-        self.assertTrue(isinstance(g, utility.Graph))
+        self.assertIsInstance(g, utility.Graph)
         self.assertTrue(g1.edge_in(1, 2))
         self.assertTrue(g1.edge_in(2, 3))
         self.assertFalse(g1.edge_in(3, 4))
@@ -318,7 +344,7 @@ class TestBagGraph(base.TestCase):
         self.assertTrue(g1.edge_in(1, 2))
         self.assertTrue(g1.edge_in(2, 3))
         self.assertTrue(g1.edge_in(3, 4))
-        self.assertTrue(isinstance(g1, utility.BagGraph))
+        self.assertIsInstance(g1, utility.BagGraph)
         self.assertEqual(g1.edge_count(2, 3), 2)
         self.assertFalse(g2.edge_in(1, 2))
         self.assertTrue(g2.edge_in(2, 3))
@@ -358,7 +384,7 @@ class TestIterstr(base.TestCase):
 
     @contextlib.contextmanager
     def get_logging_fixtures(self):
-        stream = StringIO.StringIO()
+        stream = six.moves.StringIO()
         handler = python_logging.StreamHandler(stream)
         try:
             logger = python_logging.getLogger(self.__class__.__name__)

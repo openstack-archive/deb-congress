@@ -25,7 +25,7 @@ def d6service(name, keys, inbox, datapath, args):
     return d
 
 
-class KeystoneDriver(datasource_driver.DataSourceDriver,
+class KeystoneDriver(datasource_driver.PollingDataSourceDriver,
                      datasource_driver.ExecutionDriver):
     # Table names
     USERS = "users"
@@ -72,7 +72,8 @@ class KeystoneDriver(datasource_driver.DataSourceDriver,
         datasource_driver.ExecutionDriver.__init__(self)
         self.creds = self.get_keystone_credentials_v2(args)
         self.client = keystoneclient.v2_0.client.Client(**self.creds)
-        self.inspect_builtin_methods(self.client, 'keystoneclient.v2_0.client')
+        self.add_executable_client_methods(self.client,
+                                           'keystoneclient.v2_0.client')
         self._init_end_start_poll()
 
     @staticmethod
