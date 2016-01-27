@@ -177,9 +177,8 @@ class TestRuntime(base.TestCase):
     def test_get_tablename(self):
         run = agnostic.Runtime()
         run.create_policy('test')
-        run.insert('p(x) :- q(x,y)')
-        run.insert('q(x,y) :- r(x,y)')
-        run.insert('t(x) :- q(x,y), r(x,z), equal(y, z)')
+        run.insert('p(x) :- q(x)')
+        run.insert('q(x) :- r(x)')
         run.insert('execute[nova:disconnect(x, y)] :- s(x, y)')
         tables = run.get_tablename('test', 'p')
         self.assertEqual({'p'}, set(tables))
@@ -239,22 +238,6 @@ class TestRuntime(base.TestCase):
 
         tables = run.tablenames(theory_name='test')
         self.assertEqual(set(tables), set(['p', 'q']))
-
-    @mock.patch.object(db_policy_rules, 'add_policy', side_effect=Exception())
-    def test_persistent_create_policy_with_db_exception(self, mock_add):
-        run = agnostic.Runtime()
-        with mock.patch.object(run, 'delete_policy') as mock_delete:
-            policy_name = 'test_policy'
-            self.assertRaises(exception.PolicyException,
-                              run.persistent_create_policy,
-                              policy_name)
-            mock_add.assert_called_once_with(mock.ANY,
-                                             policy_name,
-                                             policy_name[:5],
-                                             mock.ANY,
-                                             'user',
-                                             'nonrecursive')
-            mock_delete.assert_called_once_with(policy_name)
 
 
 class TestArity(base.TestCase):
