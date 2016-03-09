@@ -12,6 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import datetime
 
 import mock
@@ -363,15 +368,15 @@ class TestDataSourceDriver(base.TestCase):
         before_time = datetime.datetime.now()
         neutron.poll()
         last_updated = neutron.get_last_updated_time()
-        self.assertTrue(before_time < last_updated)
-        self.assertTrue(last_updated < datetime.datetime.now())
+        self.assertLess(before_time, last_updated)
+        self.assertLess(last_updated, datetime.datetime.now())
 
         # second time updated
         before_time = datetime.datetime.now()
         neutron.poll()
         last_updated = neutron.get_last_updated_time()
-        self.assertTrue(before_time < last_updated)
-        self.assertTrue(last_updated < datetime.datetime.now())
+        self.assertLess(before_time, last_updated)
+        self.assertLess(last_updated, datetime.datetime.now())
 
     def test_subscribe_poll(self):
         """Test subscribing before polling.  The common case."""

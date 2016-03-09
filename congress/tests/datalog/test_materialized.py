@@ -12,6 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from oslo_log import log as logging
 
 from congress.datalog import base as datalog_base
@@ -93,7 +98,7 @@ class TestRuntime(base.TestCase):
         code = ("p(x) :- q(x)")
         run = self.prep_runtime(code)
         result = run.get_target(MAT_THEORY).policy()
-        self.assertTrue(len(result) == 1)
+        self.assertEqual(1, len(result))
         self.assertTrue(compile.parse1("p(x) :- q(x)") in result)
 
         # safety 1

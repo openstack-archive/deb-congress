@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from oslo_config import cfg
 
 from congress.api import action_model
@@ -46,8 +50,9 @@ class TestActionModel(base.SqlTestCase):
                          'tenant_name': 'foo'}
         self.datasource = self.datasource_mgr.add_datasource(req)
         engine = self.cage.service_object('engine')
-        self.action_model = action_model.ActionsModel("action_schema", {},
-                                                      policy_engine=engine)
+        self.action_model = action_model.ActionsModel(
+            "action_schema", {}, policy_engine=engine,
+            datasource_mgr=self.datasource_mgr)
 
     def test_get_datasource_actions(self):
         context = {'ds_id': self.datasource['id']}

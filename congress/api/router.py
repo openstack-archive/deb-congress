@@ -13,6 +13,10 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from congress.api import versions
 from congress.api import webservice
 
@@ -118,7 +122,7 @@ class APIRouterV1(object):
         rows_path = "%s/rows" % table_path
         row_collection_handler = webservice.CollectionHandler(
             rows_path,
-            table_rows)
+            table_rows, allow_update=True)
         resource_mgr.register_handler(row_collection_handler)
         row_path = "%s/(?P<row_id>[^/]+)" % rows_path
         row_element_handler = webservice.ElementHandler(row_path, table_rows)

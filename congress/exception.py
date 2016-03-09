@@ -15,6 +15,9 @@
 #    under the License.
 
 """Congress base exception handling."""
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 
 import sys
 
@@ -62,8 +65,8 @@ class CongressException(Exception):
         :param data will contain specifics for this instance of the
         exception, e.g. a description error message.
         """
-        self.data = kwargs.pop('data', None)
-        self.name = kwargs.pop('name', None)
+        self.data = kwargs.get('data', None)
+        self.name = kwargs.get('name', None)
 
         # TODO(thinrichs): remove the rest of this (except the call to super)
         self.kwargs = kwargs
@@ -151,7 +154,7 @@ class DanglingReference(Conflict):
 #   exceptions: the policy compiler and the policy runtime, respectively.
 class PolicyException(CongressException):
     def __init__(self, msg=None, obj=None, line=None, col=None,
-                 name=None, data=None):
+                 name=None, data=None, **kwargs):
         CongressException.__init__(self, message=msg, name=name, data=data)
         self.obj = obj
         self.location = utils.Location(line=line, col=col, obj=obj)
@@ -169,3 +172,43 @@ class PolicyRuntimeException(CongressException):
 
 class IncompleteSchemaException(CongressException):
     pass
+
+
+class DataServiceError (Exception):
+    pass
+
+
+class BadConfig(BadRequest):
+    pass
+
+
+class DatasourceDriverException(CongressException):
+    pass
+
+
+class MissingRequiredConfigOptions(BadConfig):
+    msg_fmt = _("Missing required config options: %(missing_options)s")
+
+
+class InvalidDriver(BadConfig):
+    msg_fmt = _("Invalid driver: %(driver)s")
+
+
+class InvalidDriverOption(BadConfig):
+    msg_fmt = _("Invalid driver options: %(invalid_options)s")
+
+
+class DatasourceNameInUse(Conflict):
+    msg_fmt = _("Datasource already in use with name %(value)s")
+
+
+class DatasourceNotFound(NotFound):
+    msg_fmt = _("Datasource not found %(id)s")
+
+
+class DriverNotFound(NotFound):
+    msg_fmt = _("Driver not found %(id)s")
+
+
+class DatasourceCreationError(BadConfig):
+    msg_fmt = _("Datasource could not be created on the DSE: %(value)s")

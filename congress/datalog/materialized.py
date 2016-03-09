@@ -13,6 +13,10 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from oslo_log import log as logging
 from six.moves import range
 
@@ -31,7 +35,11 @@ class DeltaRule(object):
     def __init__(self, trigger, head, body, original):
         self.trigger = trigger  # atom
         self.head = head  # atom
-        self.body = body  # list of literals
+
+        # list of literals, sorted for order-insensitive comparison
+        self.body = (
+            sorted([lit for lit in body if not lit.is_builtin()]) +
+            sorted([lit for lit in body if lit.is_builtin()]))
         self.original = original  # Rule from which SELF was derived
 
     def __str__(self):
@@ -135,8 +143,6 @@ class DeltaRuleTheory (base.Theory):
                 self.all_tables[table] = 1
 
         # contents
-        # TODO(thinrichs): eliminate dups, maybe including
-        #     case where bodies are reorderings of each other
         if delta.trigger.table.table not in self.rules:
             self.rules[delta.trigger.table.table] = utility.OrderedSet()
         self.rules[delta.trigger.table.table].add(delta)

@@ -13,6 +13,18 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
+# Use new deepsix when appropriate
+from oslo_config import cfg
+if (hasattr(cfg.CONF, 'distributed_architecture')
+   and cfg.CONF.distributed_architecture):
+    from congress.dse2 import deepsix2 as deepsix
+else:
+    from congress.dse import deepsix
+
 from functools import cmp_to_key
 from functools import reduce
 
@@ -23,13 +35,14 @@ import six
 from congress.datalog import compile
 from congress.datalog import utility
 from congress.datasources import datasource_utils as ds_utils
-from congress.dse import deepsix
+from congress.dse2 import data_service
 from congress import exception
 from congress import utils
 
 import datetime
 import hashlib
 import json
+
 
 LOG = logging.getLogger(__name__)
 
@@ -249,24 +262,27 @@ class DataSourceDriver(deepsix.deepSix):
     COL = 'col'
     KEY_COL = 'key-col'
     VAL_COL = 'val-col'
+    VAL_COL_DESC = 'val-col-desc'
     EXTRACT_FN = 'extract-fn'
     IN_LIST = 'in-list'
     OBJECTS_EXTRACT_FN = 'objects-extract-fn'
     DESCRIPTION = 'desc'
 
-    # Name of the column name when using a parent key.
+    # Name of the column name and desc when using a parent key.
     PARENT_KEY_COL_NAME = 'parent_key'
     PARENT_COL_NAME = 'parent-col-name'
+    PARENT_KEY_DESC = 'parent-key-desc'
 
     # valid params
     HDICT_PARAMS = (TRANSLATION_TYPE, TABLE_NAME, PARENT_KEY, ID_COL,
                     SELECTOR_TYPE, FIELD_TRANSLATORS, IN_LIST, PARENT_COL_NAME,
-                    OBJECTS_EXTRACT_FN)
+                    OBJECTS_EXTRACT_FN, PARENT_KEY_DESC)
     FIELD_TRANSLATOR_PARAMS = (FIELDNAME, COL, DESCRIPTION, TRANSLATOR)
     VDICT_PARAMS = (TRANSLATION_TYPE, TABLE_NAME, PARENT_KEY, ID_COL, KEY_COL,
                     VAL_COL, TRANSLATOR, PARENT_COL_NAME, OBJECTS_EXTRACT_FN)
     LIST_PARAMS = (TRANSLATION_TYPE, TABLE_NAME, PARENT_KEY, ID_COL, VAL_COL,
-                   TRANSLATOR, PARENT_COL_NAME, OBJECTS_EXTRACT_FN)
+                   TRANSLATOR, PARENT_COL_NAME, OBJECTS_EXTRACT_FN,
+                   PARENT_KEY_DESC, VAL_COL_DESC)
     VALUE_PARAMS = (TRANSLATION_TYPE, EXTRACT_FN)
     TRANSLATION_TYPE_PARAMS = (TRANSLATION_TYPE,)
     VALID_TRANSLATION_TYPES = (HDICT, VDICT, LIST, VALUE)
@@ -299,7 +315,7 @@ class DataSourceDriver(deepsix.deepSix):
 
         # record table dependence for deciding which table should be cleaned up
         # when this type data is deleted entirely from datasource.
-        # the value is infered from the translators automatically when
+        # the value is inferred from the translators automatically when
         # registering translators
         # key: root table name
         # value: all related table name list(include: root table)
@@ -313,6 +329,15 @@ class DataSourceDriver(deepsix.deepSix):
         # Make sure all data structures above are set up *before* calling
         #   this because it will publish info to the bus.
         super(DataSourceDriver, self).__init__(name, keys, inbox, datapath)
+
+        # For DSE2.  Must go after __init__
+        if hasattr(self, 'add_rpc_endpoint'):
+            self.add_rpc_endpoint(DataSourceDriverEndpoints(self))
+
+    def get_snapshot(self, table_name):
+        print("datasource_driver get_snapshot(%s); %s" % (
+            table_name, self.state))
+        return self.state.get(table_name, set())
 
     def _make_tmp_state(self, root_table_name, row_data):
         tmp_state = {}
@@ -432,6 +457,21 @@ class DataSourceDriver(deepsix.deepSix):
         self._translators.append(translator)
         self._schema.update(self._get_schema(translator, {}))
 
+    def get_translator(self, translator_name):
+        """Get a translator.
+
+        Returns a translator specified by translator_name.
+        """
+        # each translator has unique name in the datasource driver
+        translator = [t for t in self.get_translators()
+                      if t['table-name'] == translator_name]
+        if len(translator) > 0:
+            return translator[0]
+        else:
+            msg = ('translator: %s is not in the datasource'
+                   ' driver' % translator_name)
+            raise exception.BadRequest(msg)
+
     def get_translators(self):
         """Get a list of translators.
 
@@ -455,7 +495,7 @@ class DataSourceDriver(deepsix.deepSix):
         elif parent_key is not None:
             parent_col_name = translator.get(cls.PARENT_COL_NAME,
                                              cls.PARENT_KEY_COL_NAME)
-            desc = translator.get(cls.DESCRIPTION)
+            desc = translator.get(cls.PARENT_KEY_DESC)
             columns.append(ds_utils.add_column(parent_col_name, desc))
 
         for field_translator in field_translators:
@@ -506,23 +546,24 @@ class DataSourceDriver(deepsix.deepSix):
         parent_key = translator.get(cls.PARENT_KEY, None)
         id_col = translator.get(cls.ID_COL, None)
         value_col = translator[cls.VAL_COL]
+        val_desc = translator.get(cls.VAL_COL_DESC)
         trans = translator[cls.TRANSLATOR]
 
         cls._get_schema(trans, schema)
         if tablename in schema:
             raise exception.InvalidParamException(
                 "table %s already in schema" % tablename)
-        # TODO(ramineni): Add 'desc' field to the translator
         if id_col:
             schema[tablename] = (ds_utils.add_column(cls._id_col_name(id_col)),
                                  ds_utils.add_column(value_col))
         elif parent_key:
             parent_col_name = translator.get(cls.PARENT_COL_NAME,
                                              cls.PARENT_KEY_COL_NAME)
-            schema[tablename] = (ds_utils.add_column(parent_col_name),
-                                 ds_utils.add_column(value_col))
+            desc = translator.get(cls.PARENT_KEY_DESC)
+            schema[tablename] = (ds_utils.add_column(parent_col_name, desc),
+                                 ds_utils.add_column(value_col, val_desc))
         else:
-            schema[tablename] = (ds_utils.add_column(value_col), )
+            schema[tablename] = (ds_utils.add_column(value_col, val_desc), )
         return schema
 
     @classmethod
@@ -575,7 +616,7 @@ class DataSourceDriver(deepsix.deepSix):
         """
         return set(cls.get_schema().keys())
 
-    def get_row_data(self, table_id, **kwargs):
+    def get_row_data(self, table_id, *args, **kwargs):
         """Gets row data for a give table."""
         results = []
         try:
@@ -1093,11 +1134,8 @@ class DataSourceDriver(deepsix.deepSix):
         d['last_error'] = str(self.last_error)
         d['number_of_updates'] = str(self.number_of_updates)
         d['initialized'] = str(self.initialized)
-        d['subscriptions'] = [(value.key, value.dataindex)
-                              for value in self.subdata.values()]
-        d['subscribers'] = [(name, pubdata.dataindex)
-                            for pubdata in self.pubdata.values()
-                            for name in pubdata.subscribers]
+        d['subscriptions'] = self.subscription_list()
+        d['subscribers'] = self.subscriber_list()
 
         return d
 
@@ -1106,6 +1144,85 @@ class DataSourceDriver(deepsix.deepSix):
                 'password': '',
                 'auth_url': '',
                 'tenant_name': ''}
+
+
+class DataSourceDriverEndpoints(data_service.DataServiceEndPoints):
+    def __init__(self, service):
+        super(DataSourceDriverEndpoints, self).__init__(service)
+
+    def get_row_data(self, context, table_id, source_id, trace):
+        return self.service.get_row_data(table_id, source_id, trace)
+
+    def get_tablename(self, context, table_id, source_id):
+        return self.service.get_tablename(table_id)
+
+    def get_tablenames(self, context, source_id):
+        return self.service.get_tablenames()
+
+    def get_status(self, context, source_id, params):
+        return self.service.get_status()
+
+    def get_datasource_schema(self, context, source_id):
+        return self.service.get_schema()
+
+    # TODO(dse2): move this to ExecutionDriver.  Can't do this immediately
+    #   since ExecutionDriver inherits from Object--not DataService.
+    #   Not sure what would happen in terms of inheritance if we were
+    #   to make ExecutionDriver inherit from DataService, since then
+    #   current datasources would inherit from 2 classes, each inheriting from
+    #   DataService.  Perhaps it is time to collapse ExecutionDriver
+    #   and DatasourceDriver into 1 class.
+    def get_actions(self, context, source_id):
+        return self.service.get_actions()
+
+    def get_datasource_info(self, context):
+        return self.service.get_datasource_info()
+
+    def request_refresh(self, context, source_id):
+        return self.service.request_refresh()
+
+
+class PushedDataSourceDriver(DataSourceDriver):
+    """Push Type DataSource Driver.
+
+    This DataSource Driver is a base class for push type datasource driver.
+    """
+
+    def __init__(self, name, keys, inbox, datapath, args):
+        super(PushedDataSourceDriver, self).__init__(name, keys, inbox,
+                                                     datapath, args)
+
+        # For DSE2.  Must go after __init__
+        if hasattr(self, 'add_rpc_endpoint'):
+            self.add_rpc_endpoint(PushedDataSourceDriverEndpoints(self))
+        self.initialized = True
+
+    def request_refresh(self):
+        # PushedDataSourceDriver doesn't start working by itself.
+        # So nothing to refresh in the method. If needed, it's
+        # overrided in a subclass.
+        pass
+
+    def update_entire_data(self, table_id, objs):
+        LOG.info('update %s table in %s datasource' % (table_id, self.name))
+        translator = self.get_translator(table_id)
+        tablename = translator['table-name']
+        self.prior_state = dict(self.state)
+        self._update_state(
+            tablename, PushedDataSourceDriver.convert_objs(objs, translator))
+        LOG.debug('publish a new state %s in %s' %
+                  (self.state[tablename], tablename))
+        self.publish(tablename, self.state[tablename])
+        self.number_of_updates += 1
+        self.last_updated_time = datetime.datetime.now()
+
+
+class PushedDataSourceDriverEndpoints(data_service.DataServiceEndPoints):
+    def __init__(self, service):
+        super(PushedDataSourceDriverEndpoints, self).__init__(service)
+
+    def update_entire_data(self, context, table_id, source_id, objs):
+        return self.service.update_entire_data(table_id, objs)
 
 
 class PollingDataSourceDriver(DataSourceDriver):

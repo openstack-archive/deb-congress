@@ -13,6 +13,10 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import copy
 import os
 import os.path
@@ -53,11 +57,7 @@ def create(rootdir, config_override=None):
     # path to congress source dir
     src_path = os.path.join(rootdir, "congress")
 
-    if cfg.CONF.distributed_architecture:
-        raise NotImplementedError(
-            'distributed architecture is not implemented yet.')
-    else:
-        datasource_mgr = datasource_manager.DataSourceManager()
+    datasource_mgr = datasource_manager.DataSourceManager()
 
     # add policy engine
     engine_path = os.path.join(src_path, "policy_engines/agnostic.py")
@@ -134,7 +134,8 @@ def create(rootdir, config_override=None):
         name="api-action",
         moduleName="API-action",
         description="API-action DSE instance",
-        args={'policy_engine': engine})
+        args={'policy_engine': engine,
+              'datasource_mgr': datasource_mgr})
 
     # add schema api
     api_path = os.path.join(src_path, "api/schema_model.py")

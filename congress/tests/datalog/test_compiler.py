@@ -12,6 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import copy
 
 from congress.datalog import analysis
@@ -204,27 +209,27 @@ class TestColumnReferences(base.TestCase):
     def test_lessthan(self):
         x = compile.parse1('nova:q(x)')
         y = compile.parse1('nova:q(x, id=y)')
-        self.assertTrue(x < y)
+        self.assertLess(x, y)
 
         x = compile.parse1('nova:q(x)')
         y = compile.parse1('nova:q(x, id=y)')
-        self.assertFalse(y < x)
+        self.assertGreaterEqual(y, x)
 
         x = compile.parse1('nova:q(x, id=w)')
         y = compile.parse1('nova:q(x, id=y)')
-        self.assertTrue(x < y)
+        self.assertLess(x, y)
 
         x = compile.parse1('nova:q(id=x)')
         y = compile.parse1('nova:q(id=y)')
-        self.assertTrue(x < y)
+        self.assertLess(x, y)
 
         x = compile.parse1('nova:q(id=x)')
         y = compile.parse1('nova:q(id=y, status=z)')
-        self.assertTrue(x < y)
+        self.assertLess(x, y)
 
         x = compile.parse1('p(x, y) :- nova:q(x, id=y)')
         y = compile.parse1('p(x, y) :- nova:q(x, id=y, status=z)')
-        self.assertTrue(x < y)
+        self.assertLess(x, y)
 
     def test_column_references_parse_errors(self):
         """Test invalid column references occurring in a single atom."""

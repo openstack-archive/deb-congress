@@ -12,37 +12,34 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from oslo_log import log as logging
 
 from congress.api import api_utils
+from congress.api import base
 from congress.api import webservice
-from congress.dse import deepsix
 from congress import exception
+
+
+LOG = logging.getLogger(__name__)
 
 
 def d6service(name, keys, inbox, datapath, args):
     return RowModel(name, keys, inbox=inbox, dataPath=datapath, **args)
 
 
-LOG = logging.getLogger(__name__)
-
-
-class RowModel(deepsix.deepSix):
-    """Model for handling API requests about Tables."""
-    def __init__(self, name, keys, inbox=None, dataPath=None,
+class RowModel(base.APIModel):
+    """Model for handling API requests about Rows."""
+    def __init__(self, name, keys='', inbox=None, dataPath=None,
                  policy_engine=None, datasource_mgr=None):
         super(RowModel, self).__init__(name, keys, inbox=inbox,
-                                       dataPath=dataPath)
-        self.engine = policy_engine
-        self.datasource_mgr = datasource_mgr
-
-    def rpc(self, caller, name, *args, **kwargs):
-        try:
-            f = getattr(caller, name)
-        except AttributeError:
-            raise exception.CongressException('method: %s is not defined in %s'
-                                              % (name, caller.__name__))
-        return f(*args, **kwargs)
+                                       dataPath=dataPath,
+                                       policy_engine=policy_engine,
+                                       datasource_mgr=datasource_mgr)
 
     # TODO(thinrichs): No rows have IDs right now.  Maybe eventually
     #   could make ID the hash of the row, but then might as well
@@ -77,24 +74,60 @@ class RowModel(deepsix.deepSix):
             gen_trace = True
 
         # Get the caller, it should be either policy or datasource
-        caller, source_id = api_utils.get_id_from_context(context,
-                                                          self.datasource_mgr,
-                                                          self.engine)
+        caller, source_id = api_utils.get_id_from_context(
+            context, self.datasource_mgr, self.engine)
+
         table_id = context['table_id']
         try:
-            result = self.rpc(caller, 'get_row_data', table_id, source_id,
-                              trace=gen_trace)
+            args = {'table_id': table_id, 'source_id': source_id,
+                    'trace': gen_trace}
+            result = self.invoke_rpc(caller, 'get_row_data', args)
         except exception.CongressException as e:
             m = ("Error occurred while processing source_id '%s' for row "
                  "data of the table '%s'" % (source_id, table_id))
             LOG.exception(m)
             raise webservice.DataModelException.create(e)
 
-        if gen_trace and caller is not self.datasource_mgr:
+        if gen_trace and caller is self.engine:
+            # DSE2 returns lists instead of tuples, so correct that.
+            result[0] = [{'data': tuple(x['data'])} for x in result[0]]
             return {'results': result[0],
                     'trace': result[1] or "Not available"}
         else:
+            result = [{'data': tuple(x['data'])} for x in result]
             return {'results': result}
+
+    def update_items(self, items, params, context=None):
+        """Updates all data in a table.
+
+        Args:
+            id_: A table id for updating all row
+            items: A data for new rows
+            params: A dict-like object containing parameters from
+                    request query
+            context: Key-values providing frame of reference of request
+        Returns: None
+        Raises:
+            KeyError: table id doesn't exist
+            DataModelException: any error occurs during replacing rows.
+        """
+        LOG.info("update_items(context=%s)" % context)
+        caller, source_id = api_utils.get_id_from_context(context,
+                                                          self.datasource_mgr,
+                                                          self.engine)
+        table_id = context['table_id']
+        try:
+            args = {'table_id': table_id, 'source_id': source_id,
+                    'objs': items}
+            self.invoke_rpc(caller, 'update_entire_data', args)
+        except exception.CongressException as e:
+            m = ("Error occurred while processing updating rows for "
+                 "source_id '%s' and table_id '%s'" % (source_id, table_id))
+            LOG.exception(m)
+            raise webservice.DataModelException.create(e)
+        LOG.info("finish update_items(context=%s)" % context)
+        LOG.debug("updated table %s with row items: %s" %
+                  (table_id, str(items)))
 
     # TODO(thinrichs): It makes sense to sometimes allow users to create
     #  a new row for internal data sources.  But since we don't have

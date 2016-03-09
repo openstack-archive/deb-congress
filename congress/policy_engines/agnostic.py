@@ -13,6 +13,18 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
+# Use new deepsix when appropriate
+from oslo_config import cfg
+if (hasattr(cfg.CONF, 'distributed_architecture')
+   and cfg.CONF.distributed_architecture):
+    from congress.dse2 import deepsix2 as deepsix
+else:
+    from congress.dse import deepsix
+
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 import six
@@ -26,7 +38,6 @@ from congress.datalog import nonrecursive
 from congress.datalog import unify
 from congress.datalog import utility
 from congress.db import db_policy_rules
-from congress.dse import deepsix
 from congress import exception
 
 LOG = logging.getLogger(__name__)
@@ -473,6 +484,18 @@ class Runtime (object):
                   policy_obj.name, policy_obj.abbr, policy_obj.kind)
         return policy_obj
 
+    def initialize_datasource(self, name, schema):
+        """Initializes datasource by creating policy and setting schema. """
+        try:
+            self.create_policy(name, kind=base.DATABASE_POLICY_TYPE)
+        except KeyError:
+            raise exception.DatasourceNameInUse(value=name)
+        try:
+            self.set_schema(name, schema)
+        except Exception:
+            self.delete_policy(name)
+            raise exception.DatasourceCreationError(value=name)
+
     def delete_policy(self, name_or_id, disallow_dangling_refs=False):
         """Deletes policy with name NAME or throws KeyError or DanglingRefs."""
         LOG.info("Deleting policy named %s", name_or_id)
@@ -587,16 +610,16 @@ class Runtime (object):
 
         return result
 
-    def get_status(self, policy_id_name, context):
+    def get_status(self, source_id, params):
         try:
-            if policy_id_name in self.policy_names():
-                target = self.policy_object(name=policy_id_name)
+            if source_id in self.policy_names():
+                target = self.policy_object(name=source_id)
             else:
-                target = self.policy_object(id=policy_id_name)
+                target = self.policy_object(id=source_id)
             keys = ['name', 'id']
 
-            if 'rule_id' in context:
-                target = target.get_rule(str(context['rule_id']))
+            if 'rule_id' in params:
+                target = target.get_rule(str(params['rule_id']))
                 keys.extend(['comment', 'original_str'])
 
         except Exception as e:
@@ -730,18 +753,24 @@ class Runtime (object):
             return self._simulate_obj(query, theory, sequence, action_theory,
                                       delta, trace)
 
-    def get_tablename(self, th_name, table_name):
-        tables = self.get_tablenames(th_name)
+    def get_tablename(self, source_id, table_id):
+        tables = self.get_tablenames(source_id)
         # when the policy doesn't have any rule 'tables' is set([])
         # when the policy doesn't exist 'tables' is None
-        if tables and table_name in tables:
-            return table_name
+        if tables and table_id in tables:
+            return table_id
 
-    def get_tablenames(self, th_name):
-        if th_name in self.theory.keys():
-            return self.tablenames(theory_name=th_name, include_modal=False)
+    def get_tablenames(self, source_id):
+        if source_id in self.theory.keys():
+            return self.tablenames(theory_name=source_id, include_modal=False)
 
-    def get_row_data(self, table_id, policy_name, trace=False):
+    def get_row_data(self, table_id, source_id, trace=False):
+        # source_id is the policy name.  But it needs to stay 'source_id'
+        #  since RPC calls invoke by the name of the argument, and we're
+        #  currently assuming the implementations of get_row_data in
+        #  the policy engine, datasources, and datasource manager all
+        #  use the same argument names.
+        policy_name = source_id
         tablename = self.get_tablename(policy_name, table_id)
         if not tablename:
             raise exception.NotFound("table '%s' doesn't exist" % table_id)
@@ -1664,10 +1693,10 @@ class DseRuntime (Runtime, deepsix.deepSix):
                                  dataPath=datapath)
         self.msg = None
         self.last_policy_change = None
-        self.d6cage = args['d6cage']
-        self.rootdir = args['rootdir']
+        self.d6cage = args.get('d6cage', None)
+        self.rootdir = args.get('rootdir', None)
         self.policySubData = {}
-        self.log_actions_only = args['log_actions_only']
+        self.log_actions_only = args.get('log_actions_only', False)
 
     def extend_schema(self, service_name, schema):
         newschema = {}
@@ -1776,8 +1805,8 @@ class DseRuntime (Runtime, deepsix.deepSix):
                 if service is not None:
                     self.log("Subscribing to new (service, table): (%s, %s)",
                              service, tablename)
-                    self.subscribe(service, tablename,
-                                   callback=self.receive_data)
+                    self._subscribe(service, tablename,
+                                    callback=self.receive_data)
 
         # unsubscribe from the old tables
         for table in rem:
@@ -1785,7 +1814,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
             if service is not None:
                 self.log("Unsubscribing to new (service, table): (%s, %s)",
                          service, tablename)
-                self.unsubscribe(service, tablename)
+                self._unsubscribe(service, tablename)
 
     def execute_action(self, service_name, action, action_args):
         """Event handler for action execution.
@@ -1823,15 +1852,19 @@ class DseRuntime (Runtime, deepsix.deepSix):
                 service_name, action, pos_args, delimit, named_args)
 
         # execute the action on a service in the DSE
-        service = self.d6cage.service_object(service_name)
-        if not service:
+        if not self.service_exists(service_name):
             raise exception.PolicyException(
                 "Service %s not found" % service_name)
         if not action:
             raise exception.PolicyException("Action not found")
         LOG.info("Sending request(%s:%s), args = %s",
-                 service.name, action, action_args)
-        self.request(service.name, action, args=action_args)
+                 service_name, action, action_args)
+        self._rpc(service_name, action, args=action_args)
+
+    def service_exists(self, service_name):
+        """Check if this service exists."""
+        obj = self.d6cage.service_object(service_name)
+        return obj is not None
 
     def pub_policy_result(self, table, olddata, newdata):
         """Callback for policy table triggers."""
@@ -1964,3 +1997,157 @@ class DseRuntime (Runtime, deepsix.deepSix):
 
     def set_synchronizer(self, synchronizer):
         self.synchronizer = synchronizer
+
+    def _rpc(self, service_name, action, args):
+        return self.request(service_name, action, args=args)
+
+    def _subscribe(self, service, tablename, callback):
+        return self.subscribe(service, tablename, callback=callback)
+
+    def _unsubscribe(self, service, tablename):
+        return self.unsubscribe(service, tablename)
+
+
+# TODO(dse2): dependency on DseRuntime is a temporary hack to minimize
+#   the code we write during migration to DSE2.  Should have Dse2Runtime
+#   inherit directly from Runtime and DSE2
+# TODO(dse2): We need to have a way for this class to set up triggers
+#   whenever a dataservice subscribes to a table managed by the policy
+#   engine.  This logic is in 'subhandler' from DseRuntime and has not
+#   been ported to DSE2.
+class Dse2Runtime(DseRuntime):
+    def __init__(self, name):
+        super(Dse2Runtime, self).__init__(
+            name=name, keys='', inbox='', datapath='', args={})
+        self.add_rpc_endpoint(Dse2RuntimeEndpoints(self))
+        # eventually we should remove the action theory as a default,
+        #   but we need to update the docs and tutorials
+
+    def _rpc(self, service_name, action, args):
+        """Overloading the DseRuntime version of _rpc so it uses dse2."""
+        return self.rpc(service_name, action, args)
+
+    # TODO(dse2): fill this in once we know how to check
+    def service_exists(self, service_name):
+        return True
+
+    def receive_data(self, publisher, table, data):
+        """Event handler for when a dataservice publishes data.
+
+        That data can either be the full table (as a list of tuples)
+        or a delta (a list of Events).
+        """
+        self.log("received data msg for %s:%s", publisher, table)
+        # if empty data, assume it is an init msg, since noop otherwise
+        if len(data) == 0:
+            self.receive_data_full(publisher, table, data)
+        else:
+            # grab an item from any iterable
+            dataelem = next(iter(data))
+            if isinstance(dataelem, compile.Event):
+                self.receive_data_update(publisher, table, data)
+            else:
+                self.receive_data_full(publisher, table, data)
+
+    def receive_data_full(self, publisher, table, data):
+        """Handler for when dataservice publishes full table."""
+        self.log("received full data msg for %s:%s. %s",
+                 publisher, table, utility.iterstr(data))
+        # Use a generator to avoid instantiating all these Facts at once.
+        literals = (compile.Fact(table, row) for row in data)
+        self.initialize_tables([table], literals, target=publisher)
+
+    def receive_data_update(self, publisher, table, data):
+        """Handler for when dataservice publishes a delta."""
+        self.log("received update data msg for %s:%s: %s",
+                 publisher, table, utility.iterstr(data))
+        events = data
+        for event in events:
+            assert compile.is_atom(event.formula), (
+                "receive_data_update received non-atom: " +
+                str(event.formula))
+            # prefix tablename with data source
+            event.target = publisher
+        (permitted, changes) = self.update(events)
+        if not permitted:
+            raise exception.CongressException(
+                "Update not permitted." + '\n'.join(str(x) for x in changes))
+        else:
+            self.log("update data msg for %s from %s caused %d "
+                     "changes: %s", table, publisher, len(changes),
+                     utility.iterstr(changes))
+            if table in self.theory[publisher].tablenames():
+                rows = self.theory[publisher].content([table])
+                self.log("current table: %s", utility.iterstr(rows))
+
+    def _subscribe(self, service, tablename, callback):
+        self.subscribe(service, tablename)
+
+    def _unsubscribe(self, service, tablename):
+        self.unsubscribe(service, tablename)
+
+
+class Dse2RuntimeEndpoints(object):
+    """RPC endpoints exposed by Dse2Runtime."""
+
+    def __init__(self, dse):
+        self.dse = dse
+
+    def persistent_create_policy(self, context, name=None, id_=None,
+                                 abbr=None, kind=None, desc=None):
+        return self.dse.persistent_create_policy(name, id_, abbr, kind, desc)
+
+    def persistent_delete_policy(self, context, name_or_id):
+        return self.dse.persistent_delete_policy(name_or_id)
+
+    def persistent_get_policies(self, context):
+        return self.dse.persistent_get_policies()
+
+    def persistent_get_policy(self, context, id_):
+        return self.dse.persistent_get_policy(id_)
+
+    def persistent_get_rule(self, context, id_, policy_name):
+        return self.dse.persistent_get_rule(id_, policy_name)
+
+    def persistent_get_rules(self, context, policy_name):
+        return self.dse.persistent_get_rules(policy_name)
+
+    def persistent_insert_rule(self, context, policy_name, str_rule, rule_name,
+                               comment):
+        return self.dse.persistent_insert_rule(
+            policy_name, str_rule, rule_name, comment)
+
+    def persistent_delete_rule(self, context, id_, policy_name_or_id):
+        return self.dse.persistent_delete_rule(id_, policy_name_or_id)
+
+    def persistent_load_policies(self, context):
+        return self.dse.persistent_load_policies()
+
+    def persistent_load_rules(self, context):
+        return self.persistent_load_rules()
+
+    def simulate(self, context, query, theory, sequence, action_theory,
+                 delta=False, trace=False, as_list=False):
+        return self.dse.simulate(query, theory, sequence, action_theory,
+                                 delta, trace, as_list)
+
+    def get_tablename(self, context, source_id, table_id):
+        return self.dse.get_tablename(source_id, table_id)
+
+    def get_tablenames(self, context, source_id):
+        return self.dse.get_tablenames(source_id)
+
+    def get_status(self, context, source_id, params):
+        return self.dse.get_status(source_id, params)
+
+    def get_row_data(self, context, table_id, source_id, trace=False):
+        return self.dse.get_row_data(table_id, source_id, trace)
+
+    def execute_action(self, context, service_name, action, action_args):
+        return self.dse.execute_action(service_name, action, action_args)
+
+    def initialize_datasource(self, context, name, schema):
+        return self.dse.initialize_datasource(name, schema)
+
+    def delete_policy(self, context, name, disallow_dangling_refs=False):
+        return self.dse.delete_policy(name, disallow_dangling_refs)

@@ -13,11 +13,17 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import json
 import os
 import time
 
+from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_messaging import conffixture
 import retrying
 
 from congress.datalog import compile
@@ -29,6 +35,27 @@ LOG = logging.getLogger(__name__)
 
 ROOTDIR = os.path.dirname(__file__)
 ETCDIR = os.path.join(ROOTDIR, 'etc')
+
+# single, global variable used to ensure different tests from
+#  different subclasses of TestCase all can get a unique ID
+#  so that the tests do not interact on oslo-messaging
+partition_counter = 0
+
+
+def get_new_partition():
+    """Create a new partition number, unique within each process."""
+    global partition_counter
+    old = partition_counter
+    partition_counter += 1
+    return old
+
+
+def generate_messaging_config():
+    mc_fixture = conffixture.ConfFixture(cfg.CONF)
+    mc_fixture.conf.transport_url = 'kombu+memory://'
+    messaging_config = mc_fixture.conf
+    messaging_config.rpc_response_timeout = 1
+    return messaging_config
 
 
 def etcdir(*p):
@@ -198,6 +225,12 @@ def form2str(formula):
 
 
 @retrying.retry(stop_max_attempt_number=1000, wait_fixed=100)
+def retry_check_for_last_message(obj):
+    if not hasattr(obj, "last_msg"):
+        raise AttributeError("Missing 'last_msg' attribute")
+
+
+@retrying.retry(stop_max_attempt_number=1000, wait_fixed=100)
 def retry_check_for_message_to_arrive(obj):
     if not hasattr(obj.msg, "body"):
         raise AttributeError("Missing 'body' attribute")
@@ -308,8 +341,10 @@ def check_subscribers(deepsix, subscriber_list):
 @retrying.retry(stop_max_attempt_number=10, wait_fixed=500)
 def retry_check_function_return_value(f, expected_value):
     """Check if function f returns expected key."""
-    if f() != expected_value:
-        raise Exception("Expected value '%s' not received" % expected_value)
+    result = f()
+    if result != expected_value:
+        raise Exception("Expected value '%s' not received.  "
+                        "Got %s instead." % (expected_value, result))
 
 
 @retrying.retry(stop_max_attempt_number=10, wait_fixed=500)
@@ -317,6 +352,18 @@ def retry_check_function_return_value_not_eq(f, value):
     """Check if function f does not return expected value."""
     if f() == value:
         raise Exception("Actual value '%s' not different from '%s'" % value)
+
+
+@retrying.retry(stop_max_attempt_number=10, wait_fixed=500)
+def retry_til_exception(expected_exception, f):
+    """Check if function f does not return expected value."""
+    try:
+        val = f()
+        raise Exception("No exception thrown; received %s" % val)
+    except expected_exception:
+        return
+    except Exception as e:
+        raise Exception("Wrong exception thrown: %s" % e)
 
 
 class FakeRequest(object):

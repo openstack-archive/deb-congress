@@ -13,10 +13,15 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from oslo_log import log as logging
 
 from congress.api import api_utils
-from congress.dse import deepsix
+from congress.api import base
+from congress.api import webservice
 from congress import exception
 
 LOG = logging.getLogger(__name__)
@@ -26,21 +31,14 @@ def d6service(name, keys, inbox, datapath, args):
     return TableModel(name, keys, inbox=inbox, dataPath=datapath, **args)
 
 
-class TableModel(deepsix.deepSix):
+class TableModel(base.APIModel):
     """Model for handling API requests about Tables."""
-    def __init__(self, name, keys, inbox=None, dataPath=None,
+    def __init__(self, name, keys='', inbox=None, dataPath=None,
                  policy_engine=None, datasource_mgr=None):
         super(TableModel, self).__init__(name, keys, inbox=inbox,
-                                         dataPath=dataPath)
-        self.datasource_mgr = datasource_mgr
-        self.engine = policy_engine
-
-    def rpc(self, caller, name, *args, **kwargs):
-        func = getattr(caller, name, None)
-        if func:
-            return func(*args, **kwargs)
-        raise exception.CongressException('method: %s is not defined in %s' %
-                                          (name, caller.__name__))
+                                         dataPath=dataPath,
+                                         policy_engine=policy_engine,
+                                         datasource_mgr=datasource_mgr)
 
     def get_item(self, id_, params, context=None):
         """Retrieve item with id id_ from model.
@@ -54,17 +52,23 @@ class TableModel(deepsix.deepSix):
         Returns:
              The matching item or None if item with id_ does not exist.
         """
+        caller, source_id = api_utils.get_id_from_context(
+            context,
+            self.datasource_mgr,
+            self.engine)
 
-        caller, source_id = api_utils.get_id_from_context(context,
-                                                          self.datasource_mgr,
-                                                          self.engine)
+        args = {'source_id': source_id, 'table_id': id_}
+        try:
+            tablename = self.invoke_rpc(caller, 'get_tablename', args)
+        except exception.CongressException as e:
+            LOG.exception("Exception occurred while retrieving table %s"
+                          "from datasource %s", id_, source_id)
+            raise webservice.DataModelException.create(e)
 
-        tablename = self.rpc(caller, 'get_tablename', source_id, id_)
         if tablename:
             return {'id': tablename}
 
-        LOG.info('source id %s or table id %s is not found',
-                 source_id, id_)
+        LOG.info('table id %s is not found in datasource %s', id_, source_id)
 
     def get_items(self, params, context=None):
         """Get items in model.
@@ -80,17 +84,21 @@ class TableModel(deepsix.deepSix):
         """
         LOG.info('get_items has context %s', context)
 
-        caller, source_id = api_utils.get_id_from_context(context,
-                                                          self.datasource_mgr,
-                                                          self.engine)
+        caller, source_id = api_utils.get_id_from_context(
+            context,
+            self.datasource_mgr,
+            self.engine)
 
-        tablenames = self.rpc(caller, 'get_tablenames', source_id)
+        try:
+            tablenames = self.invoke_rpc(caller, 'get_tablenames',
+                                         {'source_id': source_id})
+        except exception.CongressException as e:
+            LOG.exception("Exception occurred while retrieving tables"
+                          "from datasource %s", source_id)
+            raise webservice.DataModelException.create(e)
         # when the source_id doesn't have any table, 'tablenames' is set([])
-        # when the source_id doesn't exist 'tablenames' is None
-        if isinstance(tablenames, set):
+        if isinstance(tablenames, set) or isinstance(tablenames, list):
             return {'results': [{'id': x} for x in tablenames]}
-
-        LOG.info('source id %s not found', source_id)
 
     # Tables can only be created/updated/deleted by writing policy
     #   or by adding new data sources.  Once we have internal data sources

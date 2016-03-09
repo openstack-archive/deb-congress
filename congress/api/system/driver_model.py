@@ -13,12 +13,16 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 from oslo_log import log as logging
 
 from congress.api import api_utils
 from congress.api import webservice
 from congress.dse import deepsix
-from congress.managers import datasource as datasource_manager
+from congress import exception
 
 
 LOG = logging.getLogger(__name__)
@@ -78,7 +82,7 @@ class DatasourceDriverModel(deepsix.deepSix):
                               datasource)
             driver = self.rpc(self.datasource_mgr, 'get_driver_info',
                               datasource)
-        except datasource_manager.DriverNotFound as e:
+        except exception.DriverNotFound as e:
             raise webservice.DataModelException(e.code, str(e),
                                                 http_status_code=e.code)
 

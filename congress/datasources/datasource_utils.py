@@ -12,6 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import functools
 import inspect
 import re
@@ -26,6 +30,7 @@ def get_openstack_required_config():
             'username': constants.REQUIRED,
             'password': constants.REQUIRED,
             'tenant_name': constants.REQUIRED,
+            'project_name': constants.OPTIONAL,
             'poll_time': constants.OPTIONAL}
 
 
@@ -62,7 +67,7 @@ def add_column(colname, desc=None):
 def inspect_methods(client, api_prefix):
     """Inspect all callable methods from client for congress."""
 
-    # some methods are refered multiple times, we should
+    # some methods are referred multiple times, we should
     # save them here to avoid infinite loop
     obj_checked = []
     method_checked = []

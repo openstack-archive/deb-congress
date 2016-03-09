@@ -13,6 +13,10 @@
 #    under the License.
 #
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 try:
     # For Python 3
     import http.client as httplib
@@ -337,7 +341,8 @@ class CollectionHandler(AbstractApiHandler):
     """
 
     def __init__(self, path_regex, model,
-                 allow_named_create=True, allow_list=True, allow_create=True):
+                 allow_named_create=True, allow_list=True, allow_create=True,
+                 allow_update=False):
         """Initialize a collection handler.
 
         Args:
@@ -352,6 +357,7 @@ class CollectionHandler(AbstractApiHandler):
         self.allow_named_create = allow_named_create
         self.allow_list = allow_list
         self.allow_create = allow_create
+        self.allow_update = allow_update
 
     def handle_request(self, request):
         """Handle a REST request.
@@ -387,6 +393,8 @@ class CollectionHandler(AbstractApiHandler):
             return self.list_members(request)
         elif request.method == 'POST' and self.allow_create:
             return self.create_member(request)
+        elif request.method == 'PUT' and self.allow_update:
+            return self.update_members(request)
         return NOT_SUPPORTED_RESPONSE
 
     def _get_action_type(self, method):
@@ -436,6 +444,21 @@ class CollectionHandler(AbstractApiHandler):
                               status=httplib.CREATED,
                               content_type='application/json',
                               location="%s/%s" % (request.path, id_))
+
+    def update_members(self, request):
+        if not hasattr(self.model, 'update_items'):
+            return NOT_SUPPORTED_RESPONSE
+        items = self._parse_json_body(request)
+        context = self._get_context(request)
+        try:
+            self.model.update_items(items, request.params, context)
+        except KeyError as e:
+            LOG.exception("Error occured")
+            return error_response(httplib.BAD_REQUEST, httplib.BAD_REQUEST,
+                                  e.message or
+                                  'Update %s Failed' % context['table_id'])
+        return webob.Response(body="", status=httplib.OK,
+                              content_type='application/json')
 
 
 class SimpleDataModel(object):
@@ -551,3 +574,15 @@ class SimpleDataModel(object):
         ret = self.items.setdefault(cstr, {})[id_]
         del self.items[cstr][id_]
         return ret
+
+    def update_items(self, items, params, context=None):
+        """Update items in the model.
+
+        Args:
+            items: A dict-like object containing new data
+            params: A dict-like object containing parameters
+            context: Key-values providing frame of reference of request
+        Returns:
+            None.
+        """
+        self.items = items

@@ -12,6 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import copy
 import hashlib
 import json
@@ -44,13 +48,14 @@ class TestDatasourceDriver(base.TestCase):
         expected_params = {
             'hdict': ('translation-type', 'table-name', 'parent-key',
                       'id-col', 'selector-type', 'field-translators',
-                      'in-list', 'parent-col-name', 'objects-extract-fn'),
+                      'in-list', 'parent-col-name', 'objects-extract-fn',
+                      'parent-key-desc'),
             'vdict': ('translation-type', 'table-name', 'parent-key',
                       'id-col', 'key-col', 'val-col', 'translator',
                       'parent-col-name', 'objects-extract-fn'),
             'list': ('translation-type', 'table-name', 'parent-key',
                      'id-col', 'val-col', 'translator', 'parent-col-name',
-                     'objects-extract-fn'),
+                     'objects-extract-fn', 'parent-key-desc', 'val-col-desc'),
             }
 
         actual_params = {
@@ -61,7 +66,7 @@ class TestDatasourceDriver(base.TestCase):
 
         for key, params in actual_params.items():
             expected = expected_params[key]
-            self.assertTrue(expected == params)
+            self.assertEqual(params, expected)
 
     def test_in_list_results_hdict_hdict(self):
         ports_fixed_ips_translator = {
@@ -208,8 +213,10 @@ class TestDatasourceDriver(base.TestCase):
             'translation-type': 'LIST',
             'table-name': 'level2',
             'parent-key': 'id',
+            'parent-key-desc': 'level1_parent-desc',
             'parent-col-name': 'level1_id',
             'val-col': 'level_1_data',
+            'val-col-desc': 'level_1_desc',
             'translator': self.val_trans}
 
         level1_translator = {
@@ -226,8 +233,10 @@ class TestDatasourceDriver(base.TestCase):
         # test schema
         schema = driver.get_schema()
         expected = {'level1': ({'name': 'id', 'desc': None},),
-                    'level2': ({'name': 'level1_id', 'desc': None},
-                               {'name': 'level_1_data', 'desc': None})}
+                    'level2': ({'name': 'level1_id',
+                                'desc': 'level1_parent-desc'},
+                               {'name': 'level_1_data',
+                                'desc': 'level_1_desc'})}
         self.assertEqual(expected, schema)
 
         # test data
@@ -1131,28 +1140,28 @@ class TestDatasourceDriver(base.TestCase):
         schema = TestDriver().get_schema()
         self.assertEqual(7, len(schema))
 
-        self.assertTrue(schema['subtable1'] == ({'name': 'id1', 'desc': None},
-                                                {'name': 'a1', 'desc': None},
-                                                {'name': 'b1', 'desc': None}))
-        self.assertTrue(schema['subtable2'] == ({'name': 'id2', 'desc': None},
-                                                {'name': 'c1', 'desc': None},
-                                                {'name': 'd1', 'desc': None}))
-        self.assertTrue(schema['subtable3'] == ('id3', 'key3', 'value3'))
-        self.assertTrue(schema['subtable4'] == (
-            {'name': 'id4', 'desc': None},
-            {'name': 'value4', 'desc': None}))
-        self.assertTrue(schema['subtable5'] == ('key5', 'value5'))
-        self.assertTrue(schema['subtable6'] == ({'name': 'value6',
-                                                 'desc': None},))
-        self.assertTrue(schema['testtable'] == (
-            {'name': 'parent_col1', 'desc': None},
-            {'name': 'testfield2', 'desc': None},
-            {'name': 'zparent_col3', 'desc': None},
-            {'name': 'parent_col4', 'desc': None},
-            {'name': 'parent_col5', 'desc': None},
-            {'name': 'parent_col6', 'desc': None},
-            {'name': 'parent_col7', 'desc': None},
-            {'name': 'parent_col8', 'desc': None}))
+        self.assertEqual(({'name': 'id1', 'desc': None},
+                          {'name': 'a1', 'desc': None},
+                          {'name': 'b1', 'desc': None}), schema['subtable1'])
+        self.assertEqual(({'name': 'id2', 'desc': None},
+                          {'name': 'c1', 'desc': None},
+                          {'name': 'd1', 'desc': None}), schema['subtable2'])
+        self.assertEqual(('id3', 'key3', 'value3'), schema['subtable3'])
+        self.assertEqual(
+            ({'name': 'id4', 'desc': None},
+             {'name': 'value4', 'desc': None}), schema['subtable4'])
+        self.assertEqual(('key5', 'value5'), schema['subtable5'])
+        self.assertEqual(({'name': 'value6',
+                           'desc': None},), schema['subtable6'])
+        self.assertEqual(
+            ({'name': 'parent_col1', 'desc': None},
+             {'name': 'testfield2', 'desc': None},
+             {'name': 'zparent_col3', 'desc': None},
+             {'name': 'parent_col4', 'desc': None},
+             {'name': 'parent_col5', 'desc': None},
+             {'name': 'parent_col6', 'desc': None},
+             {'name': 'parent_col7', 'desc': None},
+             {'name': 'parent_col8', 'desc': None}), schema['testtable'])
 
     def test_get_schema_with_table_reuse(self):
         class TestDriver(datasource_driver.DataSourceDriver):
@@ -1200,12 +1209,12 @@ class TestDatasourceDriver(base.TestCase):
         schema = TestDriver().get_schema()
 
         self.assertEqual(2, len(schema))
-        self.assertTrue(schema['testtable'] == (
-            {'name': 'id_col', 'desc': None},
-            {'name': 'unique_key', 'desc': None}))
-        self.assertTrue(schema['subtable'] == (
-            {'name': 'parent_key', 'desc': None},
-            {'name': 'val', 'desc': None}))
+        self.assertEqual(
+            ({'name': 'id_col', 'desc': None},
+             {'name': 'unique_key', 'desc': None}), schema['testtable'])
+        self.assertEqual(
+            ({'name': 'parent_key', 'desc': None},
+             {'name': 'val', 'desc': None}), schema['subtable'])
 
     def test_get_schema_with_hdict_id_function(self):
         class TestDriver(datasource_driver.DataSourceDriver):
@@ -1229,10 +1238,10 @@ class TestDatasourceDriver(base.TestCase):
         schema = TestDriver().get_schema()
 
         self.assertEqual(1, len(schema))
-        self.assertTrue(schema['testtable'] == (
-            {'name': 'id-col', 'desc': None},
-            {'name': 'field1', 'desc': 'test-field-1'},
-            {'name': 'field2', 'desc': 'test-field-2'}))
+        self.assertEqual(
+            ({'name': 'id-col', 'desc': None},
+             {'name': 'field1', 'desc': 'test-field-1'},
+             {'name': 'field2', 'desc': 'test-field-2'}), schema['testtable'])
 
     def test_get_schema_with_vdict_parent(self):
         class TestDriver(datasource_driver.DataSourceDriver):
@@ -1256,10 +1265,10 @@ class TestDatasourceDriver(base.TestCase):
         schema = TestDriver().get_schema()
 
         self.assertEqual(2, len(schema))
-        self.assertTrue(schema['testtable'] == ('id_col', 'key'))
-        self.assertTrue(schema['subtable'] == (
-            {'name': 'parent_key', 'desc': None},
-            {'name': 'val', 'desc': None}))
+        self.assertEqual(('id_col', 'key'), schema['testtable'])
+        self.assertEqual(
+            ({'name': 'parent_key', 'desc': None},
+             {'name': 'val', 'desc': None}), schema['subtable'])
 
     def test_get_tablename(self):
         class TestDriver(datasource_driver.DataSourceDriver):
@@ -1689,6 +1698,50 @@ class TestPollingDataSourceDriver(base.TestCase):
         mock_spawn.assert_called_once_with(test_driver.poll_loop,
                                            test_driver.poll_time)
         self.assertTrue(test_driver.initialized)
+
+
+class TestPushedDriver(base.TestCase):
+    class TestDriver(datasource_driver.PushedDataSourceDriver):
+        value_trans = {'translation-type': 'VALUE'}
+        test_translator = {
+            'translation-type': 'HDICT',
+            'table-name': 'test_translator',
+            'selector-type': 'DICT_SELECTOR',
+            'field-translators':
+                ({'fieldname': 'id', 'translator': value_trans},
+                 {'fieldname': 'name', 'translator': value_trans},
+                 {'fieldname': 'status', 'translator': value_trans})
+            }
+
+        TRANSLATORS = [test_translator]
+
+        def __init__(self):
+            super(TestPushedDriver.TestDriver, self).__init__('test-pushed',
+                                                              '', None,
+                                                              None, {})
+
+    def setUp(self):
+        super(TestPushedDriver, self).setUp()
+
+    def test_init_push_driver(self):
+        test_driver = TestPushedDriver.TestDriver()
+        self.assertTrue(test_driver.initialized)
+
+    @mock.patch.object(datasource_driver.DataSourceDriver, 'publish')
+    def test_push_entire_data(self, mock_publish):
+        test_driver = TestPushedDriver.TestDriver()
+        obj = [
+            {'id': 1, 'name': 'column1', 'status': 'up'},
+            {'id': 2, 'name': 'column2', 'status': 'down'}
+            ]
+        test_driver.update_entire_data('test_translator', obj)
+        expected_state = set([
+            (1, 'column1', 'up'),
+            (2, 'column2', 'down')])
+
+        mock_publish.assert_called_with('test_translator',
+                                        test_driver.state['test_translator'])
+        self.assertEqual(expected_state, test_driver.state['test_translator'])
 
 
 class TestExecutionDriver(base.TestCase):

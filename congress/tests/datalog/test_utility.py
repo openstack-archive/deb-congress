@@ -12,6 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
+
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import contextlib
 import logging as python_logging
 
@@ -177,6 +182,29 @@ class TestGraph(base.TestCase):
         ])
         self.assertEqual(expected_cycle_set, actual_cycle_set)
 
+    def test_find_reachable_nodes(self):
+        g1 = utility.Graph()
+        self.assertEqual(g1.find_reachable_nodes([1]), set())
+        g1.add_edge(0, 1)
+        g1.add_edge(1, 2)
+        g1.add_edge(2, 3)
+        g1.add_edge(2, 4)
+        g1.add_edge(3, 5)
+        g1.add_edge(0, 6)
+        g1.add_edge(7, 8)
+        g1.add_edge(8, 9)
+        g1.add_edge(10, 5)
+        g1.add_edge(11, 12)
+        self.assertEqual(g1.find_reachable_nodes([]), set())
+        self.assertEqual(g1.find_reachable_nodes([1]), set([1, 2, 3, 4, 5]))
+        self.assertEqual(g1.find_reachable_nodes([10]), set([10, 5]))
+        self.assertEqual(g1.find_reachable_nodes([1, 10]),
+                         set([1, 2, 3, 4, 5, 10]))
+        self.assertEqual(g1.find_reachable_nodes([5]), set([5]))
+        self.assertEqual(g1.find_reachable_nodes([11]), set([11, 12]))
+        g1.add_edge(5, 2)
+        self.assertEqual(g1.find_reachable_nodes([10]), set([10, 5, 2, 3, 4]))
+
     def test_dependencies(self):
         g1 = utility.Graph()
         self.assertIsNone(g1.dependencies(1))
@@ -190,10 +218,53 @@ class TestGraph(base.TestCase):
         g1.add_edge(8, 9)
         g1.add_edge(10, 5)
         g1.add_edge(11, 12)
-        self.assertTrue(g1.dependencies(1), set([1, 2, 3, 4, 5]))
-        self.assertTrue(g1.dependencies(10), set([10, 5]))
-        self.assertTrue(g1.dependencies(5), set([5]))
-        self.assertTrue(g1.dependencies(11), set([11, 12]))
+        self.assertEqual(g1.dependencies(1), set([1, 2, 3, 4, 5]))
+        self.assertEqual(g1.dependencies(10), set([10, 5]))
+        self.assertEqual(g1.dependencies(5), set([5]))
+        self.assertEqual(g1.dependencies(11), set([11, 12]))
+
+    def test_cyclic_dependencies(self):
+        g1 = utility.Graph()
+        self.assertIsNone(g1.dependencies(1))
+        g1.add_edge(0, 1)
+        g1.add_edge(1, 2)
+        g1.add_edge(2, 3)
+        g1.add_edge(2, 4)
+        g1.add_edge(3, 5)
+        g1.add_edge(0, 6)
+        g1.add_edge(7, 8)
+        g1.add_edge(8, 9)
+        g1.add_edge(10, 5)
+        g1.add_edge(11, 12)
+        g1.add_edge(5, 2)  # create cycle
+        self.assertEqual(g1.dependencies(1), set([1, 2, 3, 4, 5]))
+        self.assertEqual(g1.dependencies(10), set([10, 5, 2, 3, 4]))
+        self.assertEqual(g1.dependencies(5), set([5, 2, 3, 4]))
+        self.assertEqual(g1.dependencies(11), set([11, 12]))
+
+    def test_find_dependent_nodes(self):
+        g1 = utility.Graph()
+        self.assertEqual(g1.find_dependent_nodes([1]), set([1]))
+        g1.add_edge(0, 1)
+        g1.add_edge(1, 2)
+        g1.add_edge(2, 3)
+        g1.add_edge(2, 4)
+        g1.add_edge(3, 5)
+        g1.add_edge(0, 6)
+        g1.add_edge(7, 8)
+        g1.add_edge(8, 9)
+        g1.add_edge(10, 5)
+        g1.add_edge(11, 12)
+        self.assertEqual(g1.find_dependent_nodes([0]), set([0]))
+        self.assertEqual(g1.find_dependent_nodes([2]), set([2, 1, 0]))
+        self.assertEqual(g1.find_dependent_nodes([5]),
+                         set([5, 0, 1, 2, 3, 10]))
+        self.assertEqual(g1.find_dependent_nodes([12]), set([11, 12]))
+        self.assertEqual(g1.find_dependent_nodes([5, 6]),
+                         set([5, 0, 1, 2, 3, 10, 6]))
+        g1.add_edge(5, 2)  # add cycle
+        self.assertEqual(g1.find_dependent_nodes([2]),
+                         set([5, 0, 1, 2, 3, 10]))
 
 
 class TestBagGraph(base.TestCase):
