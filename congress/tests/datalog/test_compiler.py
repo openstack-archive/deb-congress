@@ -20,6 +20,7 @@ from __future__ import absolute_import
 import copy
 
 from congress.datalog import analysis
+from congress.datalog import base as datalogbase
 from congress.datalog import compile
 from congress.datalog import utility
 from congress import exception
@@ -172,6 +173,7 @@ class TestColumnReferences(base.TestCase):
         """Placeholder so we don't use the actual policy-engine for tests."""
         def __init__(self, schema):
             self.schema = schema
+            self.kind = datalogbase.DATASOURCE_POLICY_TYPE
 
     def test_column_references_lowlevel(self):
         """Test column-references with low-level checks."""
@@ -401,6 +403,21 @@ class TestColumnReferences(base.TestCase):
         code = ("p(x) :- nova:q(id=x, 2=y), nova:q(id=x)")
         correct = "p(x) :- nova:q(x, x0, y), nova:q(x, y0, y1)"
         check(code, correct, 'Multiple atoms, same table')
+
+    def test_eliminate_column_references_body_order(self):
+        """Test eliminate_column_references preserves order insensitivity."""
+        run = agnostic.Runtime()
+        run.create_policy('nova')
+        schema = compile.Schema({'q': ('id', 'name', 'status'),
+                                 'r': ('id', 'age', 'weight')})
+        theories = {'nova': self.SchemaWrapper(schema)}
+
+        rule1 = compile.parse1("p(x) :- nova:q(id=x, 2=y), nova:r(id=x)"
+                               ).eliminate_column_references(theories)
+        rule2 = compile.parse1("p(x) :- nova:r(id=x), nova:q(id=x, 2=y)"
+                               ).eliminate_column_references(theories)
+        self.assertEqual(rule1, rule2, 'eliminate_column_references failed to '
+                                       'preserve order insensitivity')
 
 
 class TestCompiler(base.TestCase):
