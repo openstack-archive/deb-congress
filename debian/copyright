@@ -2,12 +2,29 @@ Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: congress
 Source: git://github.com/openstack/congress.git
 
-Files: debian/*
-Copyright: (c) 2015, Thomas Goirand <zigo@debian.org>
-License: Apache-2.0
-
 Files: *
 Copyright: (c) 2014-2015 OpenStack Foundation <openstack-dev@lists.openstack.org>
+           (c) 2013, IBM Corp.
+           (c) 2013-2015, Hewlett-Packard Development Company, L.P.
+           (c) 2014-2015, VMware.
+           (c) 2015, Intel, Inc.
+           (c) 2010, United States Government as represented by the NASA admin
+           (c) 2015, Huawei, Inc.
+           (c) 2015, NEC Corporation
+           (c) 2014, Marist SDN Innovation lab Joint with Plexxi Inc.
+           (c) 2015, Cisco, Inc
+           (c) 2014, Montavista Software, LLC.
+           (c) 2014, Plexxi, Inc.
+           (c) 2011, Piston Cloud Computing, Inc.
+           (c) 2015, Symantec
+           (c) 2016, Styra, Inc.
+           (c) 2011, Justin Santa Barbara
+           (c) 2015, NTT
+           (c) 2012, New Dream Network, LLC (DreamHost)
+License: Apache-2.0
+
+Files: debian/*
+Copyright: (c) 2015, Thomas Goirand <zigo@debian.org>
 License: Apache-2.0
 
 License: Apache-2.0
