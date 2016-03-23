@@ -1,31 +1,5 @@
-congress (3.0.0~b3-1) experimental; urgency=medium
-
-  * New upstream release.
-  * Fixed (build-)depends for this release.
-
- -- Thomas Goirand <zigo@debian.org>  Wed, 09 Mar 2016 10:37:28 +0100
-
-congress (3.0.0~b2-1) experimental; urgency=medium
-
-  * New upstream release.
-
- -- Thomas Goirand <zigo@debian.org>  Wed, 27 Jan 2016 15:01:05 +0800
-
-congress (2.0.0-3) unstable; urgency=medium
-
-  * Added q-text-as-data as depends for congress-server.
-
- -- Thomas Goirand <zigo@debian.org>  Tue, 03 Nov 2015 11:36:38 +0000
-
-congress (2.0.0-2) unstable; urgency=medium
-
-  * Uploading to unstable.
-  * Rebuilt using openstack-pkg-tools 37 to use Keystone API v3.
-
- -- Thomas Goirand <zigo@debian.org>  Tue, 03 Nov 2015 08:08:41 +0000
-
-congress (2.0.0-1) experimental; urgency=medium
+congress (3.0.0~rc1+dfsg1-1) experimental; urgency=medium
 
   * Initial release. (Closes: #801863)
 
- -- Thomas Goirand <zigo@debian.org>  Fri, 22 May 2015 00:22:01 +0200
+ -- Thomas Goirand <zigo@debian.org>  Wed, 09 Mar 2016 10:37:28 +0100
