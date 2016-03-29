@@ -1,6 +1,7 @@
 congress (3.0.0~rc1+dfsg1-2) experimental; urgency=medium
 
   * Also package congress_tempest_tests.
+  * Do not use keystone admin auth token to register API endpoint.
 
  -- Thomas Goirand <zigo@debian.org>  Fri, 25 Mar 2016 15:33:21 +0100
 
