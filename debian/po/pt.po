@@ -1,0 +1,266 @@
+# Translation of congress's debconf messages to European Portuguese
+# Copyright (C) 2016 THE congress'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the congress package.
+#
+# Américo Monteiro <a_monteiro@gmx.com>, 2016.
+msgid ""
+msgstr ""
+"Project-Id-Version: congress 3.0.0+dfsg1-1\n"
+"Report-Msgid-Bugs-To: congress@packages.debian.org\n"
+"POT-Creation-Date: 2016-03-29 12:29+0000\n"
+"PO-Revision-Date: 2016-04-17 00:32+0100\n"
+"Last-Translator: Américo Monteiro <a_monteiro@gmx.com>\n"
+"Language-Team: Portuguese <traduz@debianpt.org>\n"
+"Language: pt\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Lokalize 1.4\n"
+
+#. Type: string
+#. Description
+#: ../congress-common.templates:2001
+msgid "Authentication server hostname:"
+msgstr "Nome de maquina do servidor de autenticação:"
+
+#. Type: string
+#. Description
+#: ../congress-common.templates:2001
+msgid ""
+"Please specify the hostname of the authentication server for Congress. "
+"Typically this is also the hostname of the OpenStack Identity Service "
+"(Keystone)."
+msgstr ""
+"Por favor especifique o nome de máquina do servidor de autenticação para o "
+"Congress Tipicamente este é também o nome de máquina do Serviço de "
+"Identidade OpenStack (Keystone)."
+
+#. Type: string
+#. Description
+#. Translators: a "tenant" in OpenStack world is
+#. an entity that contains one or more username/password couples.
+#. It's typically the tenant that will be used for billing. Having more than one
+#. username/password is very helpful in larger organization.
+#. You're advised to either keep "tenant" without translating it
+#. or keep it parenthezised. Example for French:
+#. locataire ("tenant")
+#: ../congress-common.templates:3001
+msgid "Authentication server tenant name:"
+msgstr "Nome \"tenant\" do administrador de autenticação:"
+
+#. Type: string
+#. Description
+#. Translators: a "tenant" in OpenStack world is
+#. an entity that contains one or more username/password couples.
+#. It's typically the tenant that will be used for billing. Having more than one
+#. username/password is very helpful in larger organization.
+#. You're advised to either keep "tenant" without translating it
+#. or keep it parenthezised. Example for French:
+#. locataire ("tenant")
+#: ../congress-common.templates:3001
+msgid "Please specify the authentication server tenant name."
+msgstr "Por favor especifique o nome \"tenant\" do servidor de autenticação."
+
+#. Type: string
+#. Description
+#: ../congress-common.templates:4001
+msgid "Authentication server username:"
+msgstr "Nome do utilizador do servidor de autenticação:"
+
+#. Type: string
+#. Description
+#: ../congress-common.templates:4001
+msgid "Please specify the username to use with the authentication server."
+msgstr ""
+"Por favor especifique o nome de utilizador a usar com o servidor de "
+"autenticação."
+
+#. Type: password
+#. Description
+#: ../congress-common.templates:5001
+msgid "Authentication server password:"
+msgstr "Palavra passe do servidor de autenticação:"
+
+#. Type: password
+#. Description
+#: ../congress-common.templates:5001
+msgid "Please specify the password to use with the authentication server."
+msgstr ""
+"Por favor especifique a palavra passe a usar com o servidor de autenticação."
+
+#. Type: boolean
+#. Description
+#: ../congress-common.templates:6001
+msgid "Set up a database for Congress?"
+msgstr "Configurar uma base de dados para o Congress?"
+
+#. Type: boolean
+#. Description
+#: ../congress-common.templates:6001
+msgid ""
+"No database has been set up for congress to use. Before continuing, you "
+"should make sure you have the following information:"
+msgstr ""
+"Nenhuma base de dados foi configurada para o congress usar. Antes de "
+"continuar, você deve certificar-se que tem a seguinte informação:"
+
+#. Type: boolean
+#. Description
+#: ../congress-common.templates:6001
+msgid ""
+" * the type of database that you want to use;\n"
+" * the database server hostname (that server must allow TCP connections from "
+"this\n"
+"   machine);\n"
+" * a username and password to access the database."
+msgstr ""
+" * o tipo de base de dados que deseja usar;\n"
+" * o nome de máquina do servidor da base de dados (esse servidor deve "
+"permitir ligações TCP a partir desta\n"
+"   máquina);\n"
+" * um nome de utilizador e palavra passe para aceder à base de dados."
+
+#. Type: boolean
+#. Description
+#: ../congress-common.templates:6001
+msgid ""
+"If some of these requirements are missing, do not choose this option and run "
+"with regular SQLite support."
+msgstr ""
+"Se alguns destes requerimentos estão em falta, não escolha esta opção "
+"e corra com suporte SQLite regular."
+
+#. Type: boolean
+#. Description
+#: ../congress-common.templates:6001
+msgid ""
+"You can change this setting later on by running \"dpkg-reconfigure -plow "
+"congress-common\"."
+msgstr ""
+"Você pode modificar estas definições mais tarde ao correr \"dpkg-reconfigure "
+"-plow congress-common\"."
+
+#. Type: boolean
+#. Description
+#: ../congress-server.templates:2001
+msgid "Register Congress in the Keystone endpoint catalog?"
+msgstr "Registar o Congress no catálogo de \"endpoint\" do Keystone?"
+
+#. Type: boolean
+#. Description
+#: ../congress-server.templates:2001
+msgid ""
+"Each OpenStack service (each API) should be registered in order to be "
+"accessible. This is done using \"keystone service-create\" and \"keystone "
+"endpoint-create\". This can be done automatically now."
+msgstr ""
+"Cada serviço do OpenStack (cada API) deve ser registado de modo a ser "
+"acessível. Isto é feito usando \"keystone service-create\" e \"keystone "
+"endpoint-create\". Isto pode ser feito automaticamente agora."
+
+#. Type: boolean
+#. Description
+#: ../congress-server.templates:2001
+msgid ""
+"Note that you will need to have an up and running Keystone server on which "
+"to connect using a known admin project name, admin username and password. "
+"The admin auth token is not used anymore."
+msgstr ""
+"Note que irá precisar de ter um servidor Keystone a funcionar no qual ligar "
+"usando um nome de projecto admin conhecido, nome de utilizador e palavra "
+"passe admin. O token de autenticação admin não é mais utilizado."
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:3001
+msgid "Keystone server IP address:"
+msgstr "Endereço IP do servidor Keystone:"
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:3001
+msgid ""
+"Please enter the IP address of the Keystone server, so that congress-server "
+"can contact Keystone to do the Congress service and endpoint creation."
+msgstr ""
+"Por favor indique o endereço IP do servidor Keystone, para que o "
+"congress-server possa contactar o Keystone para fazer o serviço Congress "
+"e a criação do \"endpoint\"."
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:4001
+msgid "Keystone admin name:"
+msgstr "Nome de administrador do Keystone:"
+
+#. Type: string
+#. Description
+#. Type: string
+#. Description
+#. Type: password
+#. Description
+#: ../congress-server.templates:4001 ../congress-server.templates:5001
+#: ../congress-server.templates:6001
+msgid ""
+"To register the service endpoint, this package needs to know the Admin "
+"login, name, project name, and password to the Keystone server."
+msgstr ""
+"Para registar o endpoint do serviço, este pacote precisa de saber o login de "
+"Admin, o nome, nome do projecto e palavra passe para o servidor Keystone."
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:5001
+msgid "Keystone admin project name:"
+msgstr "Nome do projecto admin do Keystone:"
+
+#. Type: password
+#. Description
+#: ../congress-server.templates:6001
+msgid "Keystone admin password:"
+msgstr "Palavra passe admin do Keystone:"
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:7001
+msgid "Congress endpoint IP address:"
+msgstr "Endereço IP endpoint do Congress:"
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:7001
+msgid "Please enter the IP address that will be used to contact Congress."
+msgstr ""
+"Por favor indique o endereço IP que será usado para contactar o Congress."
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:7001
+msgid ""
+"This IP address should be accessible from the clients that will use this "
+"service, so if you are installing a public cloud, this should be a public IP "
+"address."
+msgstr ""
+"Este endereço IP deve estar acessível a partir dos clientes que irão usar "
+"este serviço, portanto se está a instalar uma cloud pública, este deve "
+"ser um endereço IP público."
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:8001
+msgid "Name of the region to register:"
+msgstr "Nome da região a registar:"
+
+#. Type: string
+#. Description
+#: ../congress-server.templates:8001
+msgid ""
+"OpenStack supports using availability zones, with each region representing a "
+"location. Please enter the zone that you wish to use when registering the "
+"endpoint."
+msgstr ""
+"O OpenStack suporta a utilização de zonas de disponibilidade, com cada "
+"região a representar uma local. Por favor indique a zona que deseja usar "
+"quando registar o \"endpoint\"."
+
