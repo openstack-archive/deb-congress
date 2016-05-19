@@ -1,6 +1,7 @@
 congress (3.0.0+dfsg1-2) UNRELEASED; urgency=medium
 
   * Added Portuguese translation for debconf messages (Closes: #821250).
+  * Added Dutch translation for debconf messages (Closes: #823445).
 
  -- Thomas Goirand <zigo@debian.org>  Wed, 20 Apr 2016 14:37:45 +0200
 
