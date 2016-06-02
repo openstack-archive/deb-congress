@@ -1,3 +1,9 @@
+congress (3.0.0+dfsg1-3) unstable; urgency=medium
+
+  * Added French debconf templates translation (Closes: #825343).
+
+ -- Thomas Goirand <zigo@debian.org>  Thu, 02 Jun 2016 09:23:49 +0200
+
 congress (3.0.0+dfsg1-2) unstable; urgency=medium
 
   * Added Portuguese translation for debconf messages (Closes: #821250).
