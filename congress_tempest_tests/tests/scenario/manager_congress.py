@@ -23,7 +23,7 @@ from tempest.lib.common.utils import data_utils
 from tempest.lib import exceptions
 from tempest import manager as tempestmanager
 from tempest.scenario import manager
-from tempest.services.network import resources as net_resources
+from tempest.scenario import network_resources
 from tempest import test
 
 from congress_tempest_tests.services.policy import policy_client
@@ -49,11 +49,19 @@ class ScenarioPolicyBase(manager.NetworkScenarioTest):
     def setUpClass(cls):
         super(ScenarioPolicyBase, cls).setUpClass()
         # auth provider for admin credentials
-        creds = credentials.get_configured_credentials('identity_admin')
+        creds = credentials.get_configured_admin_credentials('identity_admin')
         auth_prov = tempestmanager.get_auth_provider(creds)
 
         cls.admin_manager.congress_client = policy_client.PolicyClient(
             auth_prov, "policy", CONF.identity.region)
+
+        if getattr(CONF.service_available, 'ceilometer', False):
+            import ceilometer.tests.tempest.service.client as telemetry_client
+            cls.admin_manager.telemetry_client = (
+                telemetry_client.TelemetryClient(
+                    auth_prov, CONF.telemetry.catalog_type,
+                    CONF.identity.region,
+                    endpoint_type=CONF.telemetry.endpoint_type))
 
     def _setup_network_and_servers(self):
         self.security_group = (self._create_security_group
@@ -195,8 +203,8 @@ class ScenarioPolicyBase(manager.NetworkScenarioTest):
             raise exceptions.TimeoutException("No new port attached to the "
                                               "server in time (%s sec) !"
                                               % CONF.network.build_timeout)
-        new_port = net_resources.DeletablePort(client=self.network_client,
-                                               **self.new_port_list[0])
+        new_port = network_resources.DeletablePort(client=self.network_client,
+                                                   **self.new_port_list[0])
 
         def check_new_nic():
             new_nic_list = self._get_server_nics(ssh_client)

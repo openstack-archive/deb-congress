@@ -24,6 +24,7 @@ from tempest import config
 from tempest.lib import exceptions
 from tempest import manager as tempestmanager
 from tempest import test
+from urllib3.exceptions import MaxRetryError
 
 from congress_tempest_tests.services.policy import policy_client
 from congress_tempest_tests.tests.scenario import helper
@@ -107,7 +108,7 @@ class TestHA(manager_congress.ScenarioPolicyBase):
         self._cleanup_replica()
 
     def create_client(self, client_type):
-        creds = credentials.get_configured_credentials('identity_admin')
+        creds = credentials.get_configured_admin_credentials('identity_admin')
         auth_prov = tempestmanager.get_auth_provider(creds)
 
         return policy_client.PolicyClient(
@@ -126,6 +127,9 @@ class TestHA(manager_congress.ScenarioPolicyBase):
             LOG.debug("connection refused")
             return False
         except socket.error as e:
+            LOG.debug("Replica server not ready")
+            return False
+        except MaxRetryError as e:
             LOG.debug("Replica server not ready")
             return False
         except Exception as e:

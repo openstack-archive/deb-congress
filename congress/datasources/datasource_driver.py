@@ -130,7 +130,7 @@ class DataSourceDriver(deepsix.deepSix):
       that field-translator will cause the creation of a second table.  The
       field-translator will populate the second table, and each row in the
       primary table will (in the column for that field) contain a hash of the
-      second table's entries derived from the the primary table's row.  For
+      second table's entries derived from the primary table's row.  For
       example, if the translator is:
 
       {'translation-type': 'HDICT',
@@ -442,7 +442,7 @@ class DataSourceDriver(deepsix.deepSix):
 
         # check that translation_type is valid
         if translation_type not in self.VALID_TRANSLATION_TYPES:
-            msg = ("Translation Type %s not a valid transltion-type %s" % (
+            msg = ("Translation Type %s not a valid translation-type %s" % (
                    translation_type, self.VALID_TRANSLATION_TYPES))
             raise exception.InvalidTranslationType(msg)
         self._validate_by_translation_type(translator, related_tables)
@@ -1178,6 +1178,9 @@ class DataSourceDriverEndpoints(data_service.DataServiceEndPoints):
     def request_refresh(self, context, source_id):
         return self.service.request_refresh()
 
+    def execute(self, context, action, action_args):
+        return self.service.execute(action, action_args)
+
 
 class PushedDataSourceDriver(DataSourceDriver):
     """Push Type DataSource Driver.
@@ -1234,7 +1237,10 @@ class PollingDataSourceDriver(DataSourceDriver):
 
         # a number of tests rely on polling being disabled if there's no inbox
         # provided to the deepSix base class so clamp to zero here in that case
-        self.poll_time = poll_time if inbox is not None else 0
+        if cfg.CONF.distributed_architecture:
+            self.poll_time = poll_time
+        else:
+            self.poll_time = poll_time if inbox is not None else 0
 
         self.refresh_request_queue = eventlet.Queue(maxsize=1)
         self.worker_greenthread = None
@@ -1271,7 +1277,7 @@ class PollingDataSourceDriver(DataSourceDriver):
         Function called periodically to grab new information, compute
         deltas, and publish those deltas.
         """
-        self.log_info("polling")
+        LOG.info("%s:: polling", self.name)
         self.prior_state = dict(self.state)  # copying self.state
         self.last_error = None  # non-None only when last poll errored
         try:
@@ -1292,7 +1298,7 @@ class PollingDataSourceDriver(DataSourceDriver):
 
         self.last_updated_time = datetime.datetime.now()
         self.number_of_updates += 1
-        self.log_info("finished polling")
+        LOG.info("%s:: finished polling", self.name)
 
     def request_refresh(self):
         """Request a refresh of this service's data."""
@@ -1316,6 +1322,8 @@ class PollingDataSourceDriver(DataSourceDriver):
         :param poll_time: is the amount of time (in seconds) to wait between
         polling rounds.
         """
+        # todo(dse2) replace self.running with self._running since self.running
+        # is defined in deepsix and deepsix2, a placeholder.
         while self.running:
             if poll_time:
                 if self.last_updated_time is None:

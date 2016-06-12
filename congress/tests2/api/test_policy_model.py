@@ -25,8 +25,6 @@ import mock
 from oslo_utils import uuidutils
 
 from congress.api import error_codes
-from congress.api import policy_model
-from congress.api import rule_model
 from congress.api import webservice
 from congress.tests import base
 from congress.tests import helper
@@ -37,16 +35,12 @@ class TestPolicyModel(base.SqlTestCase):
     def setUp(self):
         super(TestPolicyModel, self).setUp()
 
-        self.policy_model = policy_model.PolicyModel('api-policy',
-                                                     policy_engine='engine')
-        self.rule_api = rule_model.RuleModel('api-rule',
-                                             policy_engine='engine')
-        services = api_base.setup_config([self.policy_model, self.rule_api])
+        services = api_base.setup_config()
+        self.policy_model = services['api']['api-policy']
+        self.rule_api = services['api']['api-rule']
         self.node = services['node']
         self.engine = services['engine']
         self.initial_policies = set(self.engine.policy_names())
-        # Add default policy
-        self.policy_model.add_item({'name': 'classification'}, {})
         self._add_test_policy()
 
     def _add_test_policy(self):
@@ -73,16 +67,7 @@ class TestPolicyModel(base.SqlTestCase):
         self.policy = test_policy
         self.policy2 = test_policy2
 
-        # add action theory
-        action_policy = {
-            "name": "action",
-            "description": "action description",
-            "kind": "action",
-            "abbreviation": "abbr2"
-        }
-        action_policy_id, obj = self.policy_model.add_item(action_policy, {})
-        action_policy["id"] = action_policy_id
-        action_policy["owner_id"] = obj["owner_id"]
+        action_policy = self.policy_model.get_item('action', {})
         self.action_policy = action_policy
 
     def test_in_mem_and_db_policies(self):
