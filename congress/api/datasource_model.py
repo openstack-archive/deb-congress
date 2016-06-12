@@ -27,7 +27,7 @@ from congress.api import base
 from congress.api import error_codes
 from congress.api import webservice
 from congress import exception
-
+from congress import utils
 
 LOG = logging.getLogger(__name__)
 
@@ -39,11 +39,13 @@ def d6service(name, keys, inbox, datapath, args):
 class DatasourceModel(base.APIModel):
     """Model for handling API requests about Datasources."""
     def __init__(self, name, keys='', inbox=None, dataPath=None,
-                 policy_engine=None, datasource_mgr=None, synchronizer=None):
+                 policy_engine=None, datasource_mgr=None, bus=None,
+                 synchronizer=None):
         super(DatasourceModel, self).__init__(name, keys, inbox=inbox,
                                               dataPath=dataPath,
                                               policy_engine=policy_engine,
-                                              datasource_mgr=datasource_mgr)
+                                              datasource_mgr=datasource_mgr,
+                                              bus=bus)
         self.synchronizer = synchronizer
         self.dist_arch = getattr(cfg.CONF, 'distributed_architecture', False)
 
@@ -60,7 +62,7 @@ class DatasourceModel(base.APIModel):
                  dict will also be rendered for the user.
         """
         if self.dist_arch:
-            self.datasource_mgr = self
+            self.datasource_mgr = self.bus
 
         results = self.datasource_mgr.get_datasources(filter_secret=True)
 
@@ -91,13 +93,9 @@ class DatasourceModel(base.APIModel):
         obj = None
         try:
             if self.dist_arch:
-                obj = self.add_datasource(item=item)
-                # Get the schema for the datasource using service_id
-                schema = self.invoke_rpc(obj['name'], 'get_datasource_schema',
-                                         {'source_id': obj['name']})
-                # Create policy and sets the schema once datasource is created.
-                args = {'name': obj['name'], 'schema': schema}
-                self.invoke_rpc(self.engine, 'initialize_datasource', args)
+                obj = self.bus.add_datasource(item=item)
+                utils.create_datasource_policy(self.bus, obj['name'],
+                                               self.engine)
             else:
                 obj = self.datasource_mgr.add_datasource(item=item)
         except (exception.BadConfig,
@@ -117,11 +115,11 @@ class DatasourceModel(base.APIModel):
         ds_id = context.get('ds_id')
         try:
             if self.dist_arch:
-                datasource = self.get_datasource(ds_id)
+                datasource = self.bus.get_datasource(ds_id)
                 args = {'name': datasource['name'],
                         'disallow_dangling_refs': True}
                 self.invoke_rpc(self.engine, 'delete_policy', args)
-                self.delete_datasource(datasource)
+                self.bus.delete_datasource(datasource)
             else:
                 self.datasource_mgr.delete_datasource(ds_id)
         except (exception.DatasourceNotFound,

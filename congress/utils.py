@@ -22,6 +22,7 @@ from __future__ import absolute_import
 
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 
@@ -72,6 +73,19 @@ def value_to_congress(value):
           isinstance(value, float)):
         return value
     return str(value)
+
+
+def create_datasource_policy(bus, datasource, engine):
+    # Get the schema for the datasource using
+    schema = bus.rpc(datasource, 'get_datasource_schema',
+                     {'source_id': datasource})
+    # Create policy and sets the schema once datasource is created.
+    args = {'name': datasource, 'schema': schema}
+    bus.rpc(engine, 'initialize_datasource', args)
+
+
+def get_root_path():
+    return os.path.dirname(os.path.dirname(__file__))
 
 
 class Location (object):

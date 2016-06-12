@@ -215,6 +215,9 @@ class Runtime (object):
     class is natural and useful for testing.
     """
 
+    DEFAULT_THEORY = 'classification'
+    ACTION_THEORY = 'action'
+
     def __init__(self):
         # tracer object
         self.tracer = base.Tracer()
@@ -291,7 +294,7 @@ class Runtime (object):
 
     def persistent_delete_policy(self, name_or_id):
         db_object = db_policy_rules.get_policy(name_or_id)
-        if db_object['name'] in ['classification', 'action']:
+        if db_object['name'] in [self.DEFAULT_THEORY, self.ACTION_THEORY]:
             raise KeyError("Cannot delete system-maintained policy %s" %
                            db_object['name'])
         # delete policy from memory and from database
@@ -492,7 +495,7 @@ class Runtime (object):
     def initialize_datasource(self, name, schema):
         """Initializes datasource by creating policy and setting schema. """
         try:
-            self.create_policy(name, kind=base.DATABASE_POLICY_TYPE)
+            self.create_policy(name, kind=base.DATASOURCE_POLICY_TYPE)
         except KeyError:
             raise exception.DatasourceNameInUse(value=name)
         try:
@@ -1887,7 +1890,20 @@ class DseRuntime (Runtime, deepsix.deepSix):
         self.log("Table Data:: Old: %s, new: %s, add: %s, rem: %s",
                  olddata, newdata, policySubData.to_add, policySubData.to_rem)
 
+        # TODO(dse2): checks needed that all literals are facts
+        # TODO(dse2): should we support modals and other non-fact literals?
+        if getattr(cfg.CONF, 'distributed_architecture', False):
+            # convert literals to rows
+            newdata = [lit.argument_names() for lit in newdata]
         self.publish(policySubData.dataindex, newdata)
+
+    def get_snapshot(self, table_name):
+        # print("agnostic policy engine get_snapshot(%s); %s" % (
+        #     table_name, self.policySubData[table]))
+        (policy, tablename) = compile.Tablename.parse_service_table(table_name)
+        data = self.get_row_data(tablename, policy, trace=False)
+        data = [record['data'] for record in data]
+        return data
 
     def subhandler(self, msg):
         """handler for policy table subscription
@@ -1896,6 +1912,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
         trigger for that table and publish table results when there is
         updates.
         """
+        # TODO(dse2): not used in dse2. Remove when unnecessary
 
         dataindex = msg.header['dataindex']
         (policy, tablename) = compile.Tablename.parse_service_table(dataindex)
@@ -1911,6 +1928,7 @@ class DseRuntime (Runtime, deepsix.deepSix):
 
     def unsubhandler(self, msg):
         """Remove triggers when unsubscribe."""
+        # TODO(dse2): not used in dse2. Remove when unnecessary
         dataindex = msg.header['dataindex']
         sender = msg.replyTo
         (policy, tablename) = compile.Tablename.parse_service_table(dataindex)
@@ -2031,17 +2049,30 @@ class Dse2Runtime(DseRuntime):
     def __init__(self, name):
         super(Dse2Runtime, self).__init__(
             name=name, keys='', inbox='', datapath='', args={})
+        self.log_actions_only = cfg.CONF.enable_execute_action
         self.add_rpc_endpoint(Dse2RuntimeEndpoints(self))
         # eventually we should remove the action theory as a default,
         #   but we need to update the docs and tutorials
 
+    def create_default_policies(self):
+        if self.DEFAULT_THEORY not in self.theory:
+            self.persistent_create_policy(name=self.DEFAULT_THEORY,
+                                          desc='default policy')
+
+        if self.ACTION_THEORY not in self.theory:
+            self.persistent_create_policy(name=self.ACTION_THEORY,
+                                          kind=base.ACTION_POLICY_TYPE,
+                                          desc='default action policy')
+
     def _rpc(self, service_name, action, args):
         """Overloading the DseRuntime version of _rpc so it uses dse2."""
-        return self.rpc(service_name, action, args)
+        # TODO(ramineni): This is called only during execute_action, added
+        # the same function name for compatibility with old arch
+        args = {'action': action, 'action_args': args}
+        return self.rpc(service_name, 'execute', args)
 
-    # TODO(dse2): fill this in once we know how to check
     def service_exists(self, service_name):
-        return True
+        return self.is_valid_service(service_name)
 
     def receive_data(self, publisher, table, data):
         """Event handler for when a dataservice publishes data.
@@ -2066,8 +2097,8 @@ class Dse2Runtime(DseRuntime):
         self.log("received full data msg for %s:%s. %s",
                  publisher, table, utility.iterstr(data))
         # Use a generator to avoid instantiating all these Facts at once.
-        literals = (compile.Fact(table, row) for row in data)
-        self.initialize_tables([table], literals, target=publisher)
+        facts = (compile.Fact(table, row) for row in data)
+        self.initialize_tables([table], facts, target=publisher)
 
     def receive_data_update(self, publisher, table, data):
         """Handler for when dataservice publishes a delta."""
@@ -2091,6 +2122,44 @@ class Dse2Runtime(DseRuntime):
             if table in self.theory[publisher].tablenames():
                 rows = self.theory[publisher].content([table])
                 self.log("current table: %s", utility.iterstr(rows))
+
+    def on_first_subs(self, tables):
+        """handler for policy table subscription
+
+        when a previously non-subscribed table gains a subscriber, register a
+        trigger for the tables and publish table results when there is
+        updates.
+        """
+        for table in tables:
+            (policy, tablename) = compile.Tablename.parse_service_table(
+                table)
+            # we only care about policy table subscription
+            if policy is None:
+                return
+
+            if not (tablename, policy, None) in self.policySubData:
+                trig = self.trigger_registry.register_table(
+                    tablename,
+                    policy,
+                    self.pub_policy_result)
+                self.policySubData[
+                    (tablename, policy, None)] = PolicySubData(trig)
+
+    def on_no_subs(self, tables):
+        """Remove triggers when tables have no subscribers."""
+        for table in tables:
+            (policy, tablename) = compile.Tablename.parse_service_table(table)
+            if (tablename, policy, None) in self.policySubData:
+                # release resource if no one cares about it any more
+                sub = self.policySubData.pop((tablename, policy, None))
+                self.trigger_registry.unregister(sub.trigger())
+        return True
+
+    def set_schema(self, name, schema, complete=False):
+        old_tables = self.tablenames(body_only=True)
+        super(Dse2Runtime, self).set_schema(name, schema, complete)
+        new_tables = self.tablenames(body_only=True)
+        self.update_table_subscriptions(old_tables, new_tables)
 
     def _subscribe(self, service, tablename, callback):
         self.subscribe(service, tablename)
@@ -2134,9 +2203,6 @@ class Dse2RuntimeEndpoints(object):
 
     def persistent_load_policies(self, context):
         return self.dse.persistent_load_policies()
-
-    def persistent_load_rules(self, context):
-        return self.persistent_load_rules()
 
     def simulate(self, context, query, theory, sequence, action_theory,
                  delta=False, trace=False, as_list=False):

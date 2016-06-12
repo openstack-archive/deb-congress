@@ -157,7 +157,7 @@ class TestRuntimePerformance(testbase.TestCase):
     def test_simulate_latency(self):
         # We think the cost will be the sum of the simulate call + the cost to
         # do and undo the evaluation, so this test should focus on the cost
-        # specific to the simulate call, so the the test should do a minimal
+        # specific to the simulate call, so the test should do a minimal
         # amount of evaluation.
 
         MAX = 10
@@ -237,8 +237,8 @@ class TestDsePerformance(testbase.SqlTestCase):
         policy = self.engine.DEFAULT_THEORY
         formula = compile.parse1(
             'q(1) :- data:p(1, 2.3, "foo", "bar", 1, %s)' % ('a'*100 + '1'))
-        self.api['rule'].publish(
-            'policy-update', [compile.Event(formula, target=policy)])
+        self.engine.process_policy_update(
+            [compile.Event(formula, target=policy)])
 
         # Poll data and wait til it arrives at engine
         driver.poll()
@@ -283,8 +283,8 @@ class TestDsePerformance(testbase.SqlTestCase):
         formula = compile.parse1(
             'q(1) :- data:p(1, 2.3, "foo", "bar", 1, %s)' % ('a'*100 + '1'))
         LOG.info("publishing rule")
-        self.api['rule'].publish(
-            'policy-update', [compile.Event(formula, target=policy)])
+        self.engine.process_policy_update(
+            [compile.Event(formula, target=policy)])
 
         # Poll data and wait til it arrives at engine
         driver.poll()

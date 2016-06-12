@@ -21,7 +21,6 @@ import mock
 from oslo_config import cfg
 cfg.CONF.distributed_architecture = True
 
-from congress.api import policy_model
 from congress.api import rule_model
 from congress.api import webservice
 from congress.tests import base
@@ -32,29 +31,14 @@ class TestRuleModel(base.SqlTestCase):
     def setUp(self):
         super(TestRuleModel, self).setUp()
 
-        self.rule_model = rule_model.RuleModel('api-rule',
-                                               policy_engine='engine')
-        self.policy_model = policy_model.PolicyModel('api-policy',
-                                                     policy_engine='engine')
-        result = api_base.setup_config([self.policy_model, self.rule_model])
-        self.node = result['node']
-        self.policy_model.add_item({'name': 'classification'}, {})
-        self.action_policy = self._add_action_policy()
+        services = api_base.setup_config()
+        self.policy_model = services['api']['api-policy']
+        self.rule_model = services['api']['api-rule']
+        self.node = services['node']
+
+        self.action_policy = self.policy_model.get_item('action', {})
         self.context = {'policy_id': self.action_policy["name"]}
         self._add_test_rule()
-
-    def _add_action_policy(self):
-        # add action theory
-        action_policy = {
-            "name": "action",
-            "description": "action description",
-            "kind": "action",
-            "abbreviation": "abbr2"
-        }
-        action_policy_id, obj = self.policy_model.add_item(action_policy, {})
-        action_policy["id"] = action_policy_id
-        action_policy["owner_id"] = obj["owner_id"]
-        return action_policy
 
     def _add_test_rule(self):
         test_rule1 = {

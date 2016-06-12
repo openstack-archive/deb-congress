@@ -15,11 +15,10 @@
 
 import json
 import six
-import traceback
 import uuid
 
 import eventlet
-eventlet.monkey_patch()
+eventlet.monkey_patch()  # for using oslo.messaging w/ eventlet executor
 
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -27,6 +26,7 @@ from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_messaging import exceptions as messaging_exceptions
 from oslo_utils import importutils
+from oslo_utils import strutils
 from oslo_utils import uuidutils
 
 from congress.datasources import constants
@@ -36,7 +36,7 @@ from congress.dse2.control_bus import DseNodeControlBus
 from congress import exception
 
 
-LOG = logging.getLogger()
+LOG = logging.getLogger(__name__)
 
 
 _dse_opts = [
@@ -62,6 +62,7 @@ class DseNode(object):
     RPC_VERSION = '1.0'
     CONTROL_TOPIC = 'congress-control'
     SERVICE_TOPIC_PREFIX = 'congress-service-'
+    # TODO(dse2): use exchange: 'congress'
 
     def node_rpc_target(self, namespace=None, server=None, fanout=False):
         return messaging.Target(topic=self._add_partition(self.CONTROL_TOPIC),
@@ -96,16 +97,16 @@ class DseNode(object):
         self.node_rpc_endpoints.append(DseNodeEndpoints(self))
         self._running = False
         self._services = []
-        self.instance = uuid.uuid4()
+        self.instance = uuid.uuid4()  # uuid to help recognize node_id clash
+        # TODO(dse2): add detection and logging/rectifying for node_id clash?
         self.context = self._message_context()
         self.transport = messaging.get_transport(
             self.messaging_config,
             allowed_remote_exmods=[exception.__name__, ])
         self._rpctarget = self.node_rpc_target(self.node_id, self.node_id)
-        self._rpcserver = messaging.get_rpc_server(
+        self._rpc_server = messaging.get_rpc_server(
             self.transport, self._rpctarget, self.node_rpc_endpoints,
             executor='eventlet')
-        self._service_rpc_servers = {}  # {service_id => (rpcserver, target)}
 
         # # keep track of what publisher/tables local services subscribe to
         # subscribers indexed by publisher and table:
@@ -130,32 +131,27 @@ class DseNode(object):
     def _message_context(self):
         return {'node_id': self.node_id, 'instance': str(self.instance)}
 
-    def register_service(self, service, index=None):
+    def register_service(self, service):
         assert service.node is None
         service.node = self
-        if index is not None:
-            self._services.insert(index, service)
-        else:
-            self._services.append(service)
-
-        target = self.service_rpc_target(service.service_id,
-                                         server=self.node_id)
-        srpc = messaging.get_rpc_server(
-            self.transport, target, service.rpc_endpoints(),
+        self._services.append(service)
+        service._target = self.service_rpc_target(service.service_id,
+                                                  server=self.node_id)
+        service._rpc_server = messaging.get_rpc_server(
+            self.transport, service._target, service.rpc_endpoints(),
             executor='eventlet')
-        self._service_rpc_servers[service.service_id] = (srpc, target)
-        service.start()
-        srpc.start()
-        LOG.debug('<%s> Service %s RPC Server listening on %s',
-                  self.node_id, service.service_id, target)
 
-    def unregister_service(self, service_id, index=None):
+        service.start()
+
+        LOG.debug('<%s> Service %s RPC Server listening on %s',
+                  self.node_id, service.service_id, service._target)
+
+    def unregister_service(self, service_id):
+        service = self.service_object(service_id)
         self._services = [s for s in self._services
                           if s.service_id != service_id]
-        srpc, _ = self._service_rpc_servers[service_id]
-        srpc.stop()
-        srpc.wait()
-        del self._service_rpc_servers[service_id]
+        service.stop()
+        service.wait()
 
     def get_services(self, hidden=False):
         """Return all local service objects."""
@@ -175,10 +171,10 @@ class DseNode(object):
                 [srv['service_id'] for srv in node['services']])
         return set(local_services + peer_services)
 
-    def service_object(self, name):
-        """Returns the service object of the given name.  None if not found."""
+    def service_object(self, service_id):
+        """Returns the service object of service_id.  None if not found."""
         for s in self._services:
-            if s.service_id == name:
+            if s.service_id == service_id:
                 return s
 
     def start(self):
@@ -186,35 +182,32 @@ class DseNode(object):
                   self.node_id, self.node_id, len(self._services))
 
         # Start Node RPC server
-        self._rpcserver.start()
+        self._rpc_server.start()
         LOG.debug('<%s> Node RPC Server listening on %s',
                   self.node_id, self._rpctarget)
 
         # Start Service RPC server(s)
         for s in self._services:
             s.start()
-            sspec = self._service_rpc_servers.get(s.service_id)
-            assert sspec is not None
-            srpc, target = sspec
-            srpc.start()
             LOG.debug('<%s> Service %s RPC Server listening on %s',
-                      self.node_id, s.service_id, target)
+                      self.node_id, s.service_id, s._target)
 
         self._running = True
 
     def stop(self):
+        if self._running is False:
+            return
+
         LOG.info("Stopping DSE node '%s'" % self.node_id)
-        for srpc, target in self._service_rpc_servers.values():
-            srpc.stop()
         for s in self._services:
             s.stop()
-        self._rpcserver.stop()
+        self._rpc_server.stop()
         self._running = False
 
     def wait(self):
         for s in self._services:
             s.wait()
-        self._rpcserver.wait()
+        self._rpc_server.wait()
 
     def dse_status(self):
         """Return latest observation of DSE status."""
@@ -392,6 +385,16 @@ class DseNode(object):
                 if sid in peers[peer_id]['subscribed_tables']:
                     tables_with_subs |= peers[
                         peer_id]['subscribed_tables'][sid]
+            # call DataService hooks
+            if hasattr(s, 'on_first_subs'):
+                added = tables_with_subs - s._published_tables_with_subscriber
+                if len(added) > 0:
+                    s.on_first_subs(added)
+            if hasattr(s, 'on_no_subs'):
+                removed = \
+                    s._published_tables_with_subscriber - tables_with_subs
+                if len(removed) > 0:
+                    s.on_no_subs(removed)
             s._published_tables_with_subscriber = tables_with_subs
 
     # Driver CRUD.  Maybe belongs in a subclass of DseNode?
@@ -492,9 +495,10 @@ class DseNode(object):
                 if self.is_valid_service(req['name']):
                     raise exception.DatasourceNameInUse(value=req['name'])
                 try:
-                    self.create_service(
+                    service = self.create_service(
                         class_path=driver_info['module'],
                         kwargs={'name': req['name'], 'args': item['config']})
+                    self.register_service(service)
                 except Exception:
                     raise exception.DatasourceCreationError(value=req['name'])
 
@@ -545,25 +549,23 @@ class DseNode(object):
         :param id_ is an optional parameter for specifying the uuid.
         """
 
-        # TODO(dse2): fix logging.  Want to show kwargs, but hide passwords.
-        # self.log_info("creating service %s with class %s and args %s",
-        #               name, moduleName, strutils.mask_password(args, "****"))
-
         # split class_path into module and class name
         pieces = class_path.split(".")
         module_name = ".".join(pieces[:-1])
         class_name = pieces[-1]
+        LOG.info("creating service %s with class %s and args %s",
+                 kwargs['name'], module_name,
+                 strutils.mask_password(kwargs, "****"))
 
         # import the module
         try:
             module = importutils.import_module(module_name)
             service = getattr(module, class_name)(**kwargs)
-            self.register_service(service)
         except Exception:
-            # TODO(dse2): add logging for service creation failure
-            raise exception.DataServiceError(
-                "Error loading instance of module '%s':: \n%s"
-                % (class_path, traceback.format_exc()))
+            msg = ("Error loading instance of module '%s'")
+            LOG.exception(msg % class_path)
+            raise exception.DataServiceError(msg % class_path)
+        return service
 
     def delete_datasource(self, datasource, update_db=True):
         datasource_id = datasource['id']
