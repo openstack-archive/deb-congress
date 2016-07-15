@@ -47,13 +47,13 @@ class TestHA(manager_congress.ScenarioPolicyBase):
     def _prepare_replica(self, port_num):
         replica_url = "http://127.0.0.1:%d" % port_num
         resp = self.services_client.create_service(
-            'congressha',
-            CONF.congressha.replica_type,
+            name='congressha',
+            type=CONF.congressha.replica_type,
             description='policy ha service')
         self.replica_service_id = resp['OS-KSADM:service']['id']
         resp = self.endpoints_client.create_endpoint(
-            self.replica_service_id,
-            CONF.identity.region,
+            service_id=self.replica_service_id,
+            region=CONF.identity.region,
             publicurl=replica_url,
             adminurl=replica_url,
             internalurl=replica_url)
@@ -74,11 +74,14 @@ class TestHA(manager_congress.ScenarioPolicyBase):
 
         # Add 'bind_port' and 'datasource_sync_period' to conf file.
         index = conf.find('[DEFAULT]') + len('[DEFAULT]\n')
-        conf = (conf[:index] + 'bind_port = %d\n' % port_num +
-                'datasource_sync_period = 5\n' + conf[index:])
+        conf = (conf[:index] +
+                'bind_port = %d\n' % port_num +
+                'datasource_sync_period = 5\n' +
+                'bus_id = replica-node\n' +
+                conf[index:])
         sindex = conf.find('signing_dir')
         conf = conf[:sindex] + '#' + conf[sindex:]
-
+        LOG.debug("Configuration file for replica: %s\n" % conf)
         f.write(conf)
         f.close()
 
@@ -120,16 +123,13 @@ class TestHA(manager_congress.ScenarioPolicyBase):
             LOG.debug("datasource_exists begin")
             body = client.list_datasource_status(datasource_id)
             LOG.debug("list_datasource_status: %s", str(body))
-        except exceptions.NotFound as e:
+        except exceptions.NotFound:
             LOG.debug("not found")
             return False
-        except exceptions.Unauthorized as e:
+        except exceptions.Unauthorized:
             LOG.debug("connection refused")
             return False
-        except socket.error as e:
-            LOG.debug("Replica server not ready")
-            return False
-        except MaxRetryError as e:
+        except (socket.error, MaxRetryError):
             LOG.debug("Replica server not ready")
             return False
         except Exception as e:
@@ -141,13 +141,13 @@ class TestHA(manager_congress.ScenarioPolicyBase):
             LOG.debug("datasource_missing begin")
             body = client.list_datasource_status(datasource_id)
             LOG.debug("list_datasource_status: %s", str(body))
-        except exceptions.NotFound as e:
+        except exceptions.NotFound:
             LOG.debug("not found")
             return True
-        except exceptions.Unauthorized as e:
+        except exceptions.Unauthorized:
             LOG.debug("connection refused")
             return False
-        except socket.error as e:
+        except (socket.error, MaxRetryError):
             LOG.debug("Replica server not ready")
             return False
         except Exception as e:

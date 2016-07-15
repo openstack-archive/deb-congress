@@ -58,12 +58,9 @@ function configure_congress {
     iniset $CONGRESS_CONF DEFAULT auth_strategy $CONGRESS_AUTH_STRATEGY
     iniset $CONGRESS_CONF DEFAULT distributed_architecture $CONGRESS_DISTRIBUTED_ARCHITECTURE
     if [ "$CONGRESS_DISTRIBUTED_ARCHITECTURE" == "True" ]; then
-        # TODO(masa): use hostname or usefull name in node_id for multi node install
-        # the patterns are following:
-        # 0. one dse_node runs on one devstack node
-        # 1. multi dse_nodes run on one devstack node
-        # 2. each dse_nodes run on different devstack node
-        iniset $CONGRESS_CONF dse node_id 'devstack-node'
+        # Set RabbitMQ credentials
+        iniset $CONGRESS_CONF oslo_messaging_rabbit rabbit_userid $RABBIT_USERID
+        iniset $CONGRESS_CONF oslo_messaging_rabbit rabbit_password $RABBIT_PASSWORD
     fi
 
     CONGRESS_DRIVERS="congress.datasources.neutronv2_driver.NeutronV2Driver,"
@@ -119,7 +116,7 @@ function _configure_service {
             --config username=$OS_USERNAME \
             --config tenant_name=$OS_PROJECT_NAME \
             --config password=$OS_PASSWORD \
-            --config auth_url=http://$SERVICE_HOST:5000/v2.0
+            --config auth_url=http://$SERVICE_HOST:5000/v3
     fi
 }
 
