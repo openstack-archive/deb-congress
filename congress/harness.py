@@ -40,11 +40,9 @@ from congress.api import table_model
 from congress.datalog import base
 from congress.db import datasources as db_datasources
 from congress.dse import d6cage
-from congress.dse2 import dse_node
 from congress import exception
 from congress.managers import datasource as datasource_manager
 from congress.policy_engines.agnostic import Dse2Runtime
-from congress.tests import helper
 from congress import utils
 
 
@@ -269,43 +267,46 @@ def create(rootdir, config_override=None):
     return cage
 
 
-def create2(node=None):
+def create2(node, policy_engine=True, datasources=True, api=True):
     """Get Congress up.
 
+    Creates a DseNode if one is not provided and adds policy_engine,
+    datasources, api to that node.
+
     :param node is a DseNode
+    :param policy_engine controls whether policy_engine is included
+    :param datasources controls whether datasources are included
+    :param api controls whether API is included
+    :returns DseNode
     """
-    LOG.debug("Starting Congress")
-
-    # create message bus and attach services
-    if node:
-        bus = node
-    else:
-        messaging_config = helper.generate_messaging_config()
-        bus = dse_node.DseNode(messaging_config, "root", [])
-
-    # create services
+    # create services as required
     services = {}
-    services[ENGINE_SERVICE_NAME] = create_policy_engine()
-    services['api'], services['api_service'] = create_api(
-        services[ENGINE_SERVICE_NAME])
-    services['datasources'] = create_datasources(
-        bus, services[ENGINE_SERVICE_NAME])
+    if api:
+        LOG.info("Registering congress API service on node %s", node.node_id)
+        services['api'], services['api_service'] = create_api()
+        node.register_service(services['api_service'])
 
-    bus.register_service(services[ENGINE_SERVICE_NAME])
-    initialize_policy_engine(services[ENGINE_SERVICE_NAME])
+    if policy_engine:
+        LOG.info("Registering congress PolicyEngine service on node %s",
+                 node.node_id)
+        services[ENGINE_SERVICE_NAME] = create_policy_engine()
+        node.register_service(services[ENGINE_SERVICE_NAME])
+        initialize_policy_engine(services[ENGINE_SERVICE_NAME])
 
-    for ds in services['datasources']:
-        try:
-            utils.create_datasource_policy(ds, ds.name,
-                                           services[ENGINE_SERVICE_NAME].name)
-        except (exception.BadConfig,
-                exception.DatasourceNameInUse,
-                exception.DriverNotFound,
-                exception.DatasourceCreationError) as e:
-            LOG.exception("Datasource %s creation failed. %s" % (ds, e))
-            bus.unregister_service(ds)
-
-    bus.register_service(services['api_service'])
+    if datasources:
+        LOG.info("Registering congress datasource services on node %s",
+                 node.node_id)
+        services['datasources'] = create_datasources(node)
+        for ds in services['datasources']:
+            try:
+                utils.create_datasource_policy(ds, ds.name,
+                                               ENGINE_SERVICE_NAME)
+            except (exception.BadConfig,
+                    exception.DatasourceNameInUse,
+                    exception.DriverNotFound,
+                    exception.DatasourceCreationError) as e:
+                LOG.exception("Datasource %s creation failed. %s" % (ds, e))
+                node.unregister_service(ds)
 
     # TODO(dse2): Figure out what to do about the synchronizer
     # # Start datasource synchronizer after explicitly starting the
@@ -325,43 +326,29 @@ def create2(node=None):
     return services
 
 
-def create_api(policy_engine):
+def create_api():
     """Return service that encapsulates api logic for DSE2."""
     # ResourceManager inherits from DataService
     api_resource_mgr = application.ResourceManager()
-    models = create_api_models(policy_engine, api_resource_mgr)
+    models = create_api_models(api_resource_mgr)
     router.APIRouterV1(api_resource_mgr, models)
     return models, api_resource_mgr
 
 
-def create_api_models(policy_engine, bus):
+def create_api_models(bus):
     """Create all the API models and return as a dictionary for DSE2."""
-    policy_engine = policy_engine.name
-    datasource_mgr = None
     res = {}
-    res['api-policy'] = policy_model.PolicyModel(
-        'api-policy', policy_engine=policy_engine, bus=bus)
-    res['api-rule'] = rule_model.RuleModel(
-        'api-rule', policy_engine=policy_engine, bus=bus)
-    res['api-row'] = row_model.RowModel(
-        'api-row', policy_engine=policy_engine,
-        datasource_mgr=datasource_mgr, bus=bus)
-    # TODO(dse2): migrate this to DSE2 and then reenable
+    res['api-policy'] = policy_model.PolicyModel('api-policy', bus=bus)
+    res['api-rule'] = rule_model.RuleModel('api-rule', bus=bus)
+    res['api-row'] = row_model.RowModel('api-row', bus=bus)
     res['api-datasource'] = datasource_model.DatasourceModel(
-        'api-datasource', policy_engine=policy_engine, bus=bus)
-    res['api-schema'] = schema_model.SchemaModel(
-        'api-schema', datasource_mgr=datasource_mgr, bus=bus)
-    res['api-table'] = table_model.TableModel(
-        'api-table', policy_engine=policy_engine,
-        datasource_mgr=datasource_mgr, bus=bus)
-    res['api-status'] = status_model.StatusModel(
-        'api-status', policy_engine=policy_engine,
-        datasource_mgr=datasource_mgr, bus=bus)
-    res['api-action'] = action_model.ActionsModel(
-        'api-action', policy_engine=policy_engine,
-        datasource_mgr=datasource_mgr, bus=bus)
+        'api-datasource', bus=bus)
+    res['api-schema'] = schema_model.SchemaModel('api-schema', bus=bus)
+    res['api-table'] = table_model.TableModel('api-table', bus=bus)
+    res['api-status'] = status_model.StatusModel('api-status', bus=bus)
+    res['api-action'] = action_model.ActionsModel('api-action', bus=bus)
     res['api-system'] = driver_model.DatasourceDriverModel(
-        'api-system', datasource_mgr=datasource_mgr, bus=bus)
+        'api-system', bus=bus)
     return res
 
 
@@ -380,8 +367,8 @@ def initialize_policy_engine(engine):
     engine.persistent_load_rules()
 
 
-def create_datasources(bus, engine):
-    """Create datasource services, modify engine, and return datasources."""
+def create_datasources(bus):
+    """Create datasource services and return datasources."""
     datasources = db_datasources.get_datasources()
     services = []
     for ds in datasources:

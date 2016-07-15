@@ -20,6 +20,7 @@ import uuid
 import eventlet
 eventlet.monkey_patch()  # for using oslo.messaging w/ eventlet executor
 
+from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -40,9 +41,10 @@ LOG = logging.getLogger(__name__)
 
 
 _dse_opts = [
-    cfg.StrOpt('node_id', help='Unique ID of this DseNode on the DSE')
+    cfg.StrOpt('bus_id', default='bus',
+               help='Unique ID of this DSE bus')
 ]
-cfg.CONF.register_opts(_dse_opts, group='dse')
+cfg.CONF.register_opts(_dse_opts)
 
 
 class DseNode(object):
@@ -89,11 +91,16 @@ class DseNode(object):
 
     def __init__(self, messaging_config, node_id, node_rpc_endpoints,
                  partition_id=None):
+        # Note(ekcs): temporary setting to disable use of diffs and sequencing
+        #   to avoid muddying the process of a first dse2 system test.
+        # TODO(ekcs,dse2): remove when differential update is standard
+        self.always_snapshot = False
+
         self.messaging_config = messaging_config
         self.node_id = node_id
         self.node_rpc_endpoints = node_rpc_endpoints
         # unique identifier shared by all nodes that can communicate
-        self.partition_id = partition_id
+        self.partition_id = partition_id or cfg.CONF.bus_id or "bus"
         self.node_rpc_endpoints.append(DseNodeEndpoints(self))
         self._running = False
         self._services = []
@@ -131,8 +138,15 @@ class DseNode(object):
     def _message_context(self):
         return {'node_id': self.node_id, 'instance': str(self.instance)}
 
+    @lockutils.synchronized('register_service')
     def register_service(self, service):
         assert service.node is None
+        if self.service_object(service.service_id):
+            msg = ('Service %s already exsists on the node %s'
+                   % (service.service_id, self.node_id))
+            raise exception.DataServiceError(msg)
+
+        service.always_snapshot = self.always_snapshot
         service.node = self
         self._services.append(service)
         service._target = self.service_rpc_target(service.service_id,
@@ -300,6 +314,8 @@ class DseNode(object):
         client = messaging.RPCClient(self.transport, target)
         client.cast(self.context, method, **kwargs)
 
+    # Note(ekcs): non-sequenced publish retained to simplify rollout of dse2
+    #   to be replaced by handle_publish_sequenced
     def publish_table(self, publisher, table, data):
         """Invoke RPC method on all insances of service_id.
 
@@ -318,6 +334,26 @@ class DseNode(object):
         self.broadcast_node_rpc("handle_publish", publisher=publisher,
                                 table=table, data=data)
 
+    def publish_table_sequenced(
+            self, publisher, table, data, is_snapshot, seqnum):
+        """Invoke RPC method on all insances of service_id.
+
+        Args:
+            service_id: The ID of the data service on which to invoke the call.
+            method: The method name to call.
+            kwargs: A dict of method arguments.
+
+        Returns:
+            None - Methods are invoked asynchronously and results are dropped.
+
+        Raises: RemoteError, MessageDeliveryFailure
+        """
+        LOG.trace("<%s> Publishing from '%s' table %s: %s",
+                  self.node_id, publisher, table, data)
+        self.broadcast_node_rpc(
+            "handle_publish_sequenced", publisher=publisher, table=table,
+            data=data, is_snapshot=is_snapshot, seqnum=seqnum)
+
     def table_subscribers(self, publisher, table):
         """List services on this node that subscribes to publisher/table."""
         return self.subscriptions.get(
@@ -333,11 +369,15 @@ class DseNode(object):
             self.subscriptions[publisher][table] = set()
         self.subscriptions[publisher][table].add(subscriber)
 
-        snapshot = self.invoke_service_rpc(
-            publisher, "get_snapshot", table=table)
-
         # oslo returns [] instead of set(), so handle that case directly
-        return self.to_set_of_tuples(snapshot)
+        if self.always_snapshot:
+            snapshot = self.invoke_service_rpc(
+                publisher, "get_snapshot", table=table)
+            return self.to_set_of_tuples(snapshot)
+        else:
+            snapshot_seqnum = self.invoke_service_rpc(
+                publisher, "get_last_published_data_with_seqnum", table=table)
+            return snapshot_seqnum
 
     def get_subscription(self, service_id):
         """Return publisher/tables subscribed by service: service_id
@@ -472,38 +512,45 @@ class DseNode(object):
 
     def add_datasource(self, item, deleted=False, update_db=True):
         req = self.make_datasource_dict(item)
-        # If update_db is True, new_id will get a new value from the db.
+
+        # check the request has valid information
+        self.validate_create_datasource(req)
+        if self.is_valid_service(req['name']):
+            raise exception.DatasourceNameInUse(value=req['name'])
+
         new_id = req['id']
         driver_info = self.get_driver_info(item['driver'])
-        session = db.get_session()
+        LOG.debug("adding datasource %s", req['name'])
+        if update_db:
+            LOG.debug("updating db")
+            try:
+                datasource = datasources_db.add_datasource(
+                    id_=req['id'],
+                    name=req['name'],
+                    driver=req['driver'],
+                    config=req['config'],
+                    description=req['description'],
+                    enabled=req['enabled'])
+            except db_exc.DBDuplicateEntry:
+                raise exception.DatasourceNameInUse(value=req['name'])
+
+        new_id = datasource['id']
         try:
-            with session.begin(subtransactions=True):
-                LOG.debug("adding datasource %s", req['name'])
-                if update_db:
-                    LOG.debug("updating db")
-                    datasource = datasources_db.add_datasource(
-                        id_=req['id'],
-                        name=req['name'],
-                        driver=req['driver'],
-                        config=req['config'],
-                        description=req['description'],
-                        enabled=req['enabled'],
-                        session=session)
-                    new_id = datasource['id']
+            # TODO(dse2): Call synchronizer to create datasource service after
+            # implementing synchronizer for dse2.
+            # https://bugs.launchpad.net/congress/+bug/1588167
+            service = self.create_service(
+                class_path=driver_info['module'],
+                kwargs={'name': req['name'], 'args': item['config']})
+            self.register_service(service)
+        except exception.DataServiceError:
+            LOG.exception('the datasource service is already'
+                          'created in the node')
+        except Exception:
+            if update_db:
+                datasources_db.delete_datasource(new_id)
+            raise exception.DatasourceCreationError(value=req['name'])
 
-                self.validate_create_datasource(req)
-                if self.is_valid_service(req['name']):
-                    raise exception.DatasourceNameInUse(value=req['name'])
-                try:
-                    service = self.create_service(
-                        class_path=driver_info['module'],
-                        kwargs={'name': req['name'], 'args': item['config']})
-                    self.register_service(service)
-                except Exception:
-                    raise exception.DatasourceCreationError(value=req['name'])
-
-        except db_exc.DBDuplicateEntry:
-            raise exception.DatasourceNameInUse(value=req['name'])
         new_item = dict(item)
         new_item['id'] = new_id
         return self.make_datasource_dict(new_item)
@@ -589,6 +636,8 @@ class DseNodeEndpoints (object):
     def __init__(self, dsenode):
         self.node = dsenode
 
+    # Note(ekcs): non-sequenced publish retained to simplify rollout of dse2
+    #   to be replaced by handle_publish_sequenced
     def handle_publish(self, context, publisher, table, data):
         """Function called on the node when a publication is sent.
 
@@ -596,4 +645,15 @@ class DseNodeEndpoints (object):
         """
         for s in self.node.table_subscribers(publisher, table):
             self.node.service_object(s).receive_data(
-                publisher=publisher, table=table, data=data)
+                publisher=publisher, table=table, data=data, is_snapshot=True)
+
+    def handle_publish_sequenced(
+            self, context, publisher, table, data, is_snapshot, seqnum):
+        """Function called on the node when a publication is sent.
+
+           Forwards the publication to all of the relevant services.
+        """
+        for s in self.node.table_subscribers(publisher, table):
+            self.node.service_object(s).receive_data_sequenced(
+                publisher=publisher, table=table, data=data, seqnum=seqnum,
+                is_snapshot=is_snapshot)

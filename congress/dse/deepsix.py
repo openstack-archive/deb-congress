@@ -48,7 +48,7 @@ class deepSix(greenthread.GreenThread):
 
         self.keys = keyList
 
-        self.running = True
+        self._running = True
 
         self.pubdata = {}
         self.subdata = {}
@@ -216,7 +216,7 @@ class deepSix(greenthread.GreenThread):
             except Exception as errmsg:
                 self.log("error stopping timer thread: %s", errmsg)
 
-        self.running = False
+        self._running = False
 
         self.keys = {}
         keydata = {}
@@ -489,7 +489,9 @@ class deepSix(greenthread.GreenThread):
                                      self.reqtimeout,
                                      corruuid))
 
-    def publish(self, dataindex, newdata, key=''):
+    def publish(self, dataindex, newdata, key='', use_snapshot=False):
+        # Note(ekcs): use_snapshot param is ignored.
+        #   Accepted here on temporary basis for dse1+2 compatibility.
         self.log_debug("publishing to dataindex %s with data %s",
                        dataindex, strutils.mask_password(newdata, "****"))
         if dataindex not in self.pubdata:
@@ -525,7 +527,7 @@ class deepSix(greenthread.GreenThread):
 
         # self.running will be set to False when processing a shutdown a
         # message
-        while self.running:
+        while self._running:
             if self.inbox:
                 msg = self.inbox.get()
                 self.receive(msg)
