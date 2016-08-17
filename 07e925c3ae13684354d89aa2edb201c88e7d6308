@@ -1,0 +1,10 @@
+Code-Review+2: Tim Hinrichs <timothy.l.hinrichs@gmail.com>
+Code-Review+1: Masahito Muroi <muroi.masahito@lab.ntt.co.jp>
+Code-Review+1: Aimee Ukasick <aimeeu.opensource@gmail.com>
+Workflow+1: Eric K <ekcs.openstack@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Wed, 10 Aug 2016 06:09:45 +0000
+Reviewed-on: https://review.openstack.org/305063
+Project: openstack/deb-congress
+Branch: refs/heads/master
