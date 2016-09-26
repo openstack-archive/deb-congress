@@ -1,0 +1,8 @@
+Code-Review+2: Masahito Muroi <muroi.masahito@lab.ntt.co.jp>
+Workflow+1: Masahito Muroi <muroi.masahito@lab.ntt.co.jp>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 26 Sep 2016 11:12:08 +0000
+Reviewed-on: https://review.openstack.org/375694
+Project: openstack/deb-congress
+Branch: refs/heads/stable/newton
