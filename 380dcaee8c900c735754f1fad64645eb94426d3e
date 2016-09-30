@@ -1,0 +1,9 @@
+Code-Review+2: Eric K <ekcs.openstack@gmail.com>
+Workflow+1: Eric K <ekcs.openstack@gmail.com>
+Code-Review+1: lidong <lidongbj@inspur.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 30 Sep 2016 02:02:30 +0000
+Reviewed-on: https://review.openstack.org/379773
+Project: openstack/deb-congress
+Branch: refs/heads/master
