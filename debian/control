@@ -3,7 +3,7 @@ Section: net
 Priority: extra
 Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
 Uploaders: Thomas Goirand <zigo@debian.org>,
-Build-Depends: debhelper (>= 9),
+Build-Depends: debhelper (>= 10),
                dh-python,
                dh-systemd,
                openstack-pkg-tools (>= 40~),
@@ -61,8 +61,8 @@ Build-Depends-Indep: alembic (>= 0.8.4),
                      subunit,
                      testrepository,
 Standards-Version: 3.9.7
-Vcs-Browser: https://anonscm.debian.org/gitweb/?p=openstack/congress.git;a=summary
-Vcs-Git: https://anonscm.debian.org/git/openstack/congress.git
+Vcs-Browser: https://git.openstack.org/cgit/openstack/deb-congress?h=debian%2Fnewton
+Vcs-Git: https://git.openstack.org/openstack/deb-congress -b debian/newton
 Homepage: http://congress.openstack.org/
 
 Package: python-congress
