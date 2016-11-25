@@ -1,0 +1,10 @@
+Code-Review+1: Eric K <ekcs.openstack@gmail.com>
+Code-Review+1: Masahito Muroi <muroi.masahito@lab.ntt.co.jp>
+Code-Review+2: Anusha Ramineni <anusha.ramineni@nectechnologies.in>
+Workflow+1: Anusha Ramineni <anusha.ramineni@nectechnologies.in>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 25 Nov 2016 09:51:25 +0000
+Reviewed-on: https://review.openstack.org/400322
+Project: openstack/deb-congress
+Branch: refs/heads/stable/newton
