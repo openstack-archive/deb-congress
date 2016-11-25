@@ -1,0 +1,9 @@
+Code-Review+1: Eric K <ekcs.openstack@gmail.com>
+Code-Review+2: Masahito Muroi <muroi.masahito@lab.ntt.co.jp>
+Workflow+1: Masahito Muroi <muroi.masahito@lab.ntt.co.jp>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 25 Nov 2016 05:01:41 +0000
+Reviewed-on: https://review.openstack.org/401090
+Project: openstack/deb-congress
+Branch: refs/heads/master
