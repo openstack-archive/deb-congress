@@ -1,0 +1,9 @@
+Code-Review+1: gecong <ge.cong@zte.com.cn>
+Code-Review+2: Eric Kao <ekcs.openstack@gmail.com>
+Workflow+1: Eric Kao <ekcs.openstack@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sun, 12 Mar 2017 03:56:36 +0000
+Reviewed-on: https://review.openstack.org/442265
+Project: openstack/deb-congress
+Branch: refs/heads/stable/ocata
