@@ -137,6 +137,7 @@ Architecture: all
 Depends: adduser,
          congress-common (= ${binary:Version}),
          debconf,
+         net-tools,
          q-text-as-data,
          ${misc:Depends},
          ${ostack-lsb-base},

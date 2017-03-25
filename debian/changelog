@@ -1,3 +1,10 @@
+congress (4.0.0~b2+dfsg1-2) unstable; urgency=medium
+
+  * Team upload.
+  * Add dependency net-tools to congress-server (Closes: #858693).
+
+ -- David Rabel <david.rabel@noresoft.com>  Sat, 25 Mar 2017 11:35:30 +0100
+
 congress (4.0.0~b2+dfsg1-1) experimental; urgency=medium
 
   * New upstream release.
