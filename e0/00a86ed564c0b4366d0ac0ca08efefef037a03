@@ -1,0 +1,9 @@
+Code-Review+1: gecong <ge.cong@zte.com.cn>
+Code-Review+2: Eric Kao <ekcs.openstack@gmail.com>
+Workflow+1: Eric Kao <ekcs.openstack@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Sat, 08 Apr 2017 09:20:28 +0000
+Reviewed-on: https://review.openstack.org/449359
+Project: openstack/deb-congress
+Branch: refs/heads/master
