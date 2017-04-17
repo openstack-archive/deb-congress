@@ -1,0 +1,8 @@
+Code-Review+2: Eric Kao <ekcs.openstack@gmail.com>
+Workflow+1: Eric Kao <ekcs.openstack@gmail.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 17 Apr 2017 19:05:40 +0000
+Reviewed-on: https://review.openstack.org/454966
+Project: openstack/deb-congress
+Branch: refs/heads/stable/newton
