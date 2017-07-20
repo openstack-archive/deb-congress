@@ -11,8 +11,7 @@ congress/tests/policy/snapshot/test
 *.so
 
 # Packages
-*.egg
-*.egg-info
+*.egg*
 dist
 build
 eggs
