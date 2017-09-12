@@ -1,3 +1,0 @@
-[database]
-connection = 'sqlite://'
-# connection = mysql+pymysql://root:password@127.0.0.1/congress?charset=utf8
